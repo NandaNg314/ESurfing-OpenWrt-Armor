@@ -1,0 +1,9 @@
+# OpenWrt 23.05 (fw4 / nftables)
+# Custom mangle rule for fixing outgoing TTL and IPv6 Hop Limit to 64
+# Place this file in /etc/nftables.d/40-ttl-mangle.nft
+
+chain mangle_postrouting_ttl {
+	type filter hook postrouting priority 300; policy accept;
+	oifname "wan" ip ttl set 64 counter
+	oifname "wan" ip6 hoplimit set 64 counter
+}

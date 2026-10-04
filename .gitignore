@@ -1,0 +1,17 @@
+# Prerequisites and temporary files
+*.bak
+*.tmp
+*.log
+*.jar
+*.etl
+
+# OS specific files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Sensitive configurations containing actual credentials
+esurfingclient.json
+esurfingclient
+*.key
+*.pem
