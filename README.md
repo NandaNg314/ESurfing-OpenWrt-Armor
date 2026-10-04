@@ -150,7 +150,7 @@ cat << 'EOF' > /etc/config/esurfingclient
 {
   "enabled": true,
   "web_external_acc": false,
-  "log_lv": 4,
+  "log_lv": 2,
   "log_dir": "/var/log/esurfing/logs",
   "conn_timeout": 7,
   "op_timeout": 10,
@@ -173,6 +173,7 @@ chmod 600 /etc/config/esurfingclient
 
 > **参数说明**：
 > - `channel: 1`：使用 Windows 客户端协议通道（User-Agent: `CCTP/WinSVR5/1068`），匹配 CDC-HTTP-PAP 协议与动态 ZSM 算号规则。
+> - `log_lv: 2`：**强烈推荐设为 `2`（告警级）**。若设为 `4`，客户端每 3 秒会向内存盘刷一条心跳日志，长期运行会挤占数兆 RAM；设为 `2` 可实现终身免维护且静默稳定。
 > - `conn_timeout: 7` 与 `op_timeout: 10`：为兼顾校园网高峰期波动设置的最佳超时窗口。
 
 启动服务并设置开机自启：
@@ -248,8 +249,16 @@ sh /tmp/setup-hardening.sh
    # 禁用 WAN 口 Ping 响应 (Allow-Ping)
    uci set firewall.@rule[1].enabled='0'
    uci commit firewall
+   ```
 
-   # 重载防火墙生效
+4. **关闭芯片级硬件流加速（关键避坑）**：
+   ```bash
+   # 保留软件流加速，禁用硬件加速 (flow_offloading_hw=0)
+   # 防止芯片硬件 NAT 引擎绕过 Netfilter 防火墙导致出向 TTL=64 伪装穿透失效
+   uci set firewall.@defaults[0].flow_offloading_hw='0' 2>/dev/null
+   uci commit firewall
+
+   # 重载防火墙使全部加固规则生效
    /etc/init.d/firewall restart
    ```
 </details>

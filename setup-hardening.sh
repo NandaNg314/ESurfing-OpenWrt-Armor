@@ -101,7 +101,7 @@ fi
 info "-> UPnP 与 LLTD 服务已禁用"
 
 # 5. 关闭 WAN 口 Ping 响应 (Allow-Ping)
-info "步骤 4/4: 关闭 WAN 口 ICMP Ping 响应..."
+info "步骤 4/5: 关闭 WAN 口 ICMP Ping 响应..."
 ALLOW_PING_IDX=""
 for i in $(seq 0 20); do
     RULE_NAME=$(uci get firewall.@rule[$i].name 2>/dev/null || true)
@@ -119,7 +119,15 @@ else
     warn "-> 未在 firewall 配置中找到名为 Allow-Ping 的规则，请按需手动检查"
 fi
 
-# 6. 重启防火墙使规则生效
+# 6. 关闭硬件流量加速 (保留软件流加速，防止硬件 NAT 绕过防火墙导致出向 TTL 伪装穿透)
+info "步骤 5/5: 优化流量转发加速策略 (关闭硬件加速，确保出向 TTL 100% 被改写)..."
+if uci get firewall.@defaults[0].flow_offloading_hw >/dev/null 2>&1; then
+    uci set firewall.@defaults[0].flow_offloading_hw='0'
+    uci commit firewall
+    info "-> 已禁用 flow_offloading_hw (杜绝硬件 PPE 绕过 Netfilter)"
+fi
+
+# 7. 重启防火墙使规则生效
 info "正在重载防火墙服务 (fw4 restart)..."
 /etc/init.d/firewall restart >/dev/null 2>&1
 
