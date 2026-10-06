@@ -155,6 +155,29 @@ else
 fi
 
 echo ""
+
+# 5. 检查网络自愈看门狗与定时任务
+info "5. 检查自愈看门狗与定时维护计划..."
+if [ -x "/usr/bin/esurfing-watchdog.sh" ]; then
+    pass "自愈看门狗脚本已安装且具备执行权限 (/usr/bin/esurfing-watchdog.sh)"
+else
+    warn "未检测到可执行的自愈看门狗脚本，建议运行 setup-hardening.sh 安装"
+fi
+
+CRON_JOB=$(crontab -l 2>/dev/null || cat /etc/crontabs/root 2>/dev/null || true)
+if echo "$CRON_JOB" | grep -q "esurfing-watchdog.sh"; then
+    pass "Crontab 每 2 分钟自愈看门狗任务已挂载"
+else
+    warn "Crontab 中未找到 esurfing-watchdog.sh 任务"
+fi
+
+if echo "$CRON_JOB" | grep -q "esurfingclient restart"; then
+    pass "Crontab 每天清晨 05:30 租期预防性刷新任务已挂载"
+else
+    warn "Crontab 中未找到清晨 05:30 租期预防性刷新任务"
+fi
+
+echo ""
 echo "============================================================"
 info "自检流程完成！"
 echo "============================================================"
