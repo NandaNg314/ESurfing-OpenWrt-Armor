@@ -178,7 +178,7 @@ chmod 600 /etc/config/esurfingclient
 
 > **参数说明**：
 > - `channel: 1`：使用 Windows 客户端协议通道（User-Agent: `CCTP/WinSVR5/1068`），匹配 CDC-HTTP-PAP 协议与动态 ZSM 算号规则。
-> - `log_lv: 2`：**强烈推荐设为 `2`（告警级）**。若设为 `4`，客户端每 3 秒会向内存盘刷一条心跳日志，长期运行会挤占数兆 RAM；设为 `2` 可实现终身免维护且静默稳定。
+> - `log_lv: 4`：**推荐设为 `4`（INFO）或 `2`（告警级）**。切勿设为 `6`（VERBOSE），否则客户端每秒都会向内存盘狂刷底层报文与 curl 调试日志，堆积数十兆轮转日志挤占路由器 RAM；设为 `4` 或 `2` 并配合本项目的月度清理计划，可确保关键断网排查信息完整且终身免维护。
 > - `conn_timeout: 7` 与 `op_timeout: 10`：为兼顾校园网高峰期波动设置的最佳超时窗口。
 
 启动服务并设置开机自启：
@@ -281,6 +281,8 @@ sh setup-hardening.sh
    30 5 * * * /usr/bin/esurfing-renew.sh >/dev/null 2>&1
    # 每 2 分钟网络健康看门狗：断网自动秒级自愈，打破指数退避长等待
    */2 * * * * /usr/bin/esurfing-watchdog.sh >/dev/null 2>&1
+   # 每月 1 号凌晨 04:00 自动清理历史轮转日志兜底 (防 tmpfs 内存盘溢出)
+   0 4 1 * * rm -f /tmp/log/esurfing/logs/logs/*.rotate.log 2>/dev/null
    EOF
 
    /etc/init.d/cron restart

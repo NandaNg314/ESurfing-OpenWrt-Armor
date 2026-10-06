@@ -1,7 +1,7 @@
 {
   "enabled": true,
   "web_external_acc": false,
-  "log_lv": 2,
+  "log_lv": 4,
   "log_dir": "/var/log/esurfing/logs",
   "conn_timeout": 7,
   "op_timeout": 10,

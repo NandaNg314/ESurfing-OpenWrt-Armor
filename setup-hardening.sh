@@ -144,6 +144,7 @@ fi
 
 mkdir -p /etc/crontabs
 touch /etc/crontabs/root
+CRON_MODIFIED=0
 if ! grep -q 'esurfing-renew.sh' /etc/crontabs/root 2>/dev/null; then
     # 清理可能存在的旧版 restart 任务
     sed -i '/esurfingclient restart/d' /etc/crontabs/root 2>/dev/null || true
@@ -153,10 +154,23 @@ if ! grep -q 'esurfing-renew.sh' /etc/crontabs/root 2>/dev/null; then
 # 每 2 分钟网络健康看门狗：断网自动秒级自愈，打破指数退避长等待
 */2 * * * * /usr/bin/esurfing-watchdog.sh >/dev/null 2>&1
 EOF
-    /etc/init.d/cron restart >/dev/null 2>&1 || true
+    CRON_MODIFIED=1
     info "-> 已注入清晨防踢线与自愈看门狗计划任务"
+fi
+
+if ! grep -q 'rotate.log' /etc/crontabs/root 2>/dev/null; then
+    cat << 'EOF' >> /etc/crontabs/root
+# 每月 1 号凌晨 04:00 自动清理历史轮转日志兜底 (防 tmpfs 内存盘溢出)
+0 4 1 * * rm -f /tmp/log/esurfing/logs/logs/*.rotate.log 2>/dev/null
+EOF
+    CRON_MODIFIED=1
+    info "-> 已注入每月历史日志自动清理兜底任务"
+fi
+
+if [ "$CRON_MODIFIED" -eq 1 ]; then
+    /etc/init.d/cron restart >/dev/null 2>&1 || true
 else
-    info "-> 计划任务已存在，跳过重复写入"
+    info "-> 计划任务已完整，跳过重复写入"
 fi
 
 # 8. 重启防火墙使规则生效

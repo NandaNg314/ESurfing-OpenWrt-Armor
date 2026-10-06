@@ -85,6 +85,14 @@ else
     warn "未找到运行日志 $LOG_FILE (若刚启动或未开调试日志可忽略)"
 fi
 
+LOG_USAGE_KB=$(du -sk /tmp/log/esurfing 2>/dev/null | awk '{print $1}' || echo "0")
+case "$LOG_USAGE_KB" in ''|*[!0-9]*) LOG_USAGE_KB=0 ;; esac
+if [ "$LOG_USAGE_KB" -gt 20480 ]; then
+    warn "认证日志目录占用较大 (${LOG_USAGE_KB}KB)，建议检查 /etc/config/esurfingclient 的 log_lv 是否为 4 (INFO) 或 2 (ERROR)"
+elif [ "$LOG_USAGE_KB" -gt 0 ]; then
+    pass "认证日志目录占用健康 (${LOG_USAGE_KB}KB / tmpfs 内存安全)"
+fi
+
 echo ""
 
 # 3. 检查防共享检测加固 (fw4 / nftables)
@@ -181,6 +189,12 @@ if echo "$CRON_JOB" | grep -q "esurfing-renew.sh"; then
     pass "Crontab 每天清晨 05:30 优雅续约任务已挂载"
 else
     warn "Crontab 中未找到清晨 05:30 优雅续约任务 (esurfing-renew.sh)"
+fi
+
+if echo "$CRON_JOB" | grep -q "rotate.log"; then
+    pass "Crontab 每月日志自动清理兜底任务已挂载"
+else
+    warn "Crontab 中未找到每月日志清理任务，建议运行 setup-hardening.sh 注入"
 fi
 
 echo ""
