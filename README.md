@@ -63,9 +63,10 @@
 
 | 文件 | 类型 | 用途说明 |
 | :--- | :--- | :--- |
-| [`setup-hardening.sh`](./setup-hardening.sh) | Shell 脚本 | **OpenWrt 一键防多设备检测加固脚本**（自动注入出向 TTL=64、配置 NTP 局域网劫持、隐藏路由特征并部署自愈看门狗） |
-| [`check-status.sh`](./check-status.sh) | Shell 脚本 | **一键状态健康自检脚本**（检查网卡、IP、拨号进程、防火墙计数、外网 DNS 与 204 放行） |
-| [`esurfing-watchdog.sh`](./esurfing-watchdog.sh) | Shell 脚本 | **网络健康自愈看门狗**（定时检测 204 放行状态，遭遇机房踢线或异常断网时跨过指数退避死等，秒级自愈） |
+| [`setup-hardening.sh`](./setup-hardening.sh) | Shell 脚本 | **OpenWrt 一键防多设备检测加固脚本**（自动注入出向 TTL=64、配置 NTP 局域网劫持、隐藏路由特征并部署全套自愈系统） |
+| [`check-status.sh`](./check-status.sh) | Shell 脚本 | **一键状态健康自检脚本**（检查网卡、IP、拨号进程、防火墙计数、外网 DNS 与 204 放行、看门狗与定时计划） |
+| [`esurfing-watchdog.sh`](./esurfing-watchdog.sh) | Shell 脚本 | **双通道网络自愈看门狗**（定时双探针检测 204 状态，遭遇机房踢线或算法缺陷时跨通道自动故障转移，打破退避死等） |
+| [`esurfing-renew.sh`](./esurfing-renew.sh) | Shell 脚本 | **清晨优雅租期重置与保活脚本**（清晨主动带冷释放重置会话，预留机房释放缓冲与自检，彻底重置 48 小时租期） |
 | [`40-ttl-mangle.nft`](./40-ttl-mangle.nft) | nftables 规则 | OpenWrt 23.05+ (fw4) 原生出向流量锁定 TTL/HopLimit=64 规则片段 |
 | [`esurfingclient.example.json`](./esurfingclient.example.json) | 配置模板 | 天翼校园客户端脱敏配置文件模板（严格限制为 `chmod 600`，内置 Windows 客户端 Channel 1 通道参数） |
 | [`README.md`](./README.md) | 文档 | 完整通用部署指南、架构原理与深度故障避坑图谱 |
@@ -194,15 +195,15 @@ chmod 600 /etc/config/esurfingclient
 
 #### 方案 A：一键加固脚本（强烈推荐）
 
-将仓库中的全部脚本（`setup-hardening.sh`、`esurfing-watchdog.sh`、`check-status.sh`）上传至路由器 `/tmp` 目录并执行：
+将仓库中的全部脚本（`setup-hardening.sh`、`esurfing-watchdog.sh`、`esurfing-renew.sh`、`check-status.sh`）上传至路由器 `/tmp` 目录并执行：
 
 ```bash
 cd /tmp
-chmod +x setup-hardening.sh esurfing-watchdog.sh check-status.sh
+chmod +x setup-hardening.sh esurfing-watchdog.sh esurfing-renew.sh check-status.sh
 sh setup-hardening.sh
 ```
 
-*脚本会自动完成出向 TTL/HL=64 规则注入、本地 NTP 授时服务启用与局域网重定向劫持、关闭 UPnP/LLTD、屏蔽外网 Ping，并自动安装双通道自愈看门狗与清晨 05:30 租期无感刷新计划任务。*
+*脚本会自动完成出向 TTL/HL=64 规则注入、本地 NTP 授时服务启用与局域网重定向劫持、关闭 UPnP/LLTD、屏蔽外网 Ping，并自动安装双通道自愈看门狗与清晨 05:30 优雅租期重置脚本。*
 
 ---
 
@@ -267,16 +268,17 @@ sh setup-hardening.sh
    /etc/init.d/firewall restart
    ```
 
-5. **部署双通道网络自愈看门狗与清晨防踢线计划**：
+5. **部署双通道自愈看门狗与清晨优雅续约计划**：
    ```bash
-   # 安装看门狗脚本
+   # 安装看门狗与续约脚本
    cp esurfing-watchdog.sh /usr/bin/esurfing-watchdog.sh
-   chmod +x /usr/bin/esurfing-watchdog.sh
+   cp esurfing-renew.sh /usr/bin/esurfing-renew.sh
+   chmod +x /usr/bin/esurfing-watchdog.sh /usr/bin/esurfing-renew.sh
 
    # 挂载计划任务
    cat << 'EOF' >> /etc/crontabs/root
-   # 每天清晨 05:30 静默轮换一次会话，重置电信 48 小时租期，避开白天/晚间断网
-   30 5 * * * /etc/init.d/esurfingclient restart >/dev/null 2>&1
+   # 每天清晨 05:30 优雅刷新租期 (带冷释放与自动通道热备，防踢线防假死)
+   30 5 * * * /usr/bin/esurfing-renew.sh >/dev/null 2>&1
    # 每 2 分钟网络健康看门狗：断网自动秒级自愈，打破指数退避长等待
    */2 * * * * /usr/bin/esurfing-watchdog.sh >/dev/null 2>&1
    EOF
@@ -377,8 +379,10 @@ sh /tmp/check-status.sh
      - 当断线后重新发起握手时，若恰好遇到电信机房物理端口 30~60 秒的会话注销冷却期，或机房动态下发了特定算法挑战分支（如 Windows 通道的 `cdy 5`），会导致首次 Ticket 获取返回空响应；
      - 此时官方客户端会触发指数退避机制（重试间隔迅速递增至 `60s -> 300s(5分) -> 600s(10分) -> 1200s(20分)`），导致虽然机房早已允许连接，客户端却在倒计时中休眠干等。
 - **解决方案（本项目双重高可用加固保障）**：
-  1. **源头预防（清晨 05:30 自动重置租期）**：
-     电信 48 小时计时器在每次重新拨号时重置。通过在 OpenWrt crontab 中注入每天清晨 `05:30`（全宿舍熟睡时）自动重启一次认证服务（仅耗时 2~3 秒）。通过每天清晨的轻量重置，**48 小时倒计时永远不会在白天或晚间用网高峰期到期**！
+  1. **源头预防（清晨 05:30 优雅租期重置 `esurfing-renew.sh`）**：
+     - **杜绝盲目重启撞冷却**：若在 05:30 机械执行服务重启，由于旧会话刚登出，极易撞上机房 30~60 秒注销冷却期而首次失败。本项目专属脚本 `esurfing-renew.sh` 在停用服务后，**主动下线 WAN 口并休眠 10 秒**，为机房 BRAS 预留充足的旧会话注销时间；
+     - **重新握手与自检闭环**：重新拉起 WAN 口并启动服务后，脚本会**主动探测 204 放行状态**；若首次握手偶遇算法池异常（如 cdy 5），脚本会在 15 秒内**自动切换至 iOS 通道 4 重新握手**，确保清晨 05:31 之前 100% 确认网络通畅才退出，全宿舍早晨醒来无感可用；
+     - **清零 48 小时计时器**：每天清晨自动将租期倒计时归零，**48 小时强制踢线永远不会在白天或晚间用网高峰期发生**！
   2. **底线自愈（双通道热备看门狗 `esurfing-watchdog.sh`）**：
      - **双探针防抖**：每 2 分钟通过华为与小米双独立 204 源检测网络，初次未通过时强制等待 8 秒二次复测，杜绝网络轻微抖动导致的误重启；
      - **打断退避死等**：一旦确认断网，立即重启认证服务重置退避计时器，跨过官方 20 分钟死等，秒级自愈；

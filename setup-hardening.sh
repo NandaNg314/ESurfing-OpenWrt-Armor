@@ -128,7 +128,7 @@ if uci get firewall.@defaults[0].flow_offloading_hw >/dev/null 2>&1; then
 fi
 
 # 7. 部署断网秒级自愈看门狗与清晨 48 小时租期预防性刷新
-info "步骤 6/6: 配置断网秒级自愈看门狗与 48 小时租期预防性刷新计划..."
+info "步骤 6/6: 配置断网秒级自愈看门狗与清晨优雅续约计划..."
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ -f "$SCRIPT_DIR/esurfing-watchdog.sh" ]; then
     cp "$SCRIPT_DIR/esurfing-watchdog.sh" /usr/bin/esurfing-watchdog.sh
@@ -136,12 +136,20 @@ if [ -f "$SCRIPT_DIR/esurfing-watchdog.sh" ]; then
     info "-> 已安装自愈看门狗脚本至 /usr/bin/esurfing-watchdog.sh"
 fi
 
+if [ -f "$SCRIPT_DIR/esurfing-renew.sh" ]; then
+    cp "$SCRIPT_DIR/esurfing-renew.sh" /usr/bin/esurfing-renew.sh
+    chmod +x /usr/bin/esurfing-renew.sh
+    info "-> 已安装清晨优雅续约脚本至 /usr/bin/esurfing-renew.sh"
+fi
+
 mkdir -p /etc/crontabs
 touch /etc/crontabs/root
-if ! grep -q 'esurfing-watchdog.sh' /etc/crontabs/root 2>/dev/null; then
+if ! grep -q 'esurfing-renew.sh' /etc/crontabs/root 2>/dev/null; then
+    # 清理可能存在的旧版 restart 任务
+    sed -i '/esurfingclient restart/d' /etc/crontabs/root 2>/dev/null || true
     cat << 'EOF' >> /etc/crontabs/root
-# 每天清晨 05:30 静默轮换一次会话，重置电信 48 小时租期，避开白天/晚间断网
-30 5 * * * /etc/init.d/esurfingclient restart >/dev/null 2>&1
+# 每天清晨 05:30 优雅刷新租期 (带冷释放与自动通道热备，防踢线防假死)
+30 5 * * * /usr/bin/esurfing-renew.sh >/dev/null 2>&1
 # 每 2 分钟网络健康看门狗：断网自动秒级自愈，打破指数退避长等待
 */2 * * * * /usr/bin/esurfing-watchdog.sh >/dev/null 2>&1
 EOF

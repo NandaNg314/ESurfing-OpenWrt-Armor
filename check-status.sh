@@ -164,6 +164,12 @@ else
     warn "未检测到可执行的自愈看门狗脚本，建议运行 setup-hardening.sh 安装"
 fi
 
+if [ -x "/usr/bin/esurfing-renew.sh" ]; then
+    pass "清晨优雅续约脚本已安装且具备执行权限 (/usr/bin/esurfing-renew.sh)"
+else
+    warn "未检测到可执行的清晨续约脚本 (/usr/bin/esurfing-renew.sh)"
+fi
+
 CRON_JOB=$(crontab -l 2>/dev/null || cat /etc/crontabs/root 2>/dev/null || true)
 if echo "$CRON_JOB" | grep -q "esurfing-watchdog.sh"; then
     pass "Crontab 每 2 分钟自愈看门狗任务已挂载"
@@ -171,10 +177,10 @@ else
     warn "Crontab 中未找到 esurfing-watchdog.sh 任务"
 fi
 
-if echo "$CRON_JOB" | grep -q "esurfingclient restart"; then
-    pass "Crontab 每天清晨 05:30 租期预防性刷新任务已挂载"
+if echo "$CRON_JOB" | grep -q "esurfing-renew.sh"; then
+    pass "Crontab 每天清晨 05:30 优雅续约任务已挂载"
 else
-    warn "Crontab 中未找到清晨 05:30 租期预防性刷新任务"
+    warn "Crontab 中未找到清晨 05:30 优雅续约任务 (esurfing-renew.sh)"
 fi
 
 echo ""
