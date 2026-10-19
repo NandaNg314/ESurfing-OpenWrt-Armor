@@ -11,7 +11,7 @@
       "username": "<YOUR_CAMPUS_ACCOUNT>",
       "password": "<YOUR_CAMPUS_PASSWORD>",
       "channel": 1,
-      "mark": "dorm",
+      "mark": "",
       "time_windows": []
     }
   ]
