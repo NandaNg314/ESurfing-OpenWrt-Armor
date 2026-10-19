@@ -5,6 +5,39 @@
 
 CONFIG_FILE="/etc/config/esurfingclient"
 
+# 互斥锁: 本脚本执行期间会 ifdown wan、停服务，此时看门狗的探测必然失败。
+# 由看门狗检测该文件并跳过自愈，避免两者互相打断 (详见 esurfing-watchdog.sh)
+RENEW_LOCK="/tmp/esurfing_renew.lock"
+
+# 无论正常结束还是被 kill 都要清掉锁，否则看门狗会一直跳过自愈。
+# 注意 ash 的 trap 要等当前前台命令 (如 sleep) 结束才执行，所以这里显式
+# exit，避免被停之后脚本还继续往下跑完整个流程
+release_lock() {
+    rm -f "$RENEW_LOCK"
+    exit 0
+}
+trap release_lock EXIT INT TERM HUP
+
+# 已有实例在跑就退出 (cron 重复触发或手动执行时)
+if [ -f "$RENEW_LOCK" ]; then
+    OLD_PID=$(cat "$RENEW_LOCK" 2>/dev/null || echo 0)
+    case "$OLD_PID" in ''|*[!0-9]*) OLD_PID=0 ;; esac
+    # 上一次异常退出留下的死锁 (进程已不存在) 直接接管
+    if [ "$OLD_PID" -ne 0 ] && kill -0 "$OLD_PID" 2>/dev/null; then
+        logger -t esurfing-renew "已有续约进程在运行 (pid $OLD_PID)，本次退出"
+        trap - EXIT INT TERM HUP
+        exit 0
+    fi
+fi
+
+echo $$ > "$RENEW_LOCK"
+
+# 被信号中断后立即退出的 sleep，避免 trap 迟迟不触发
+renew_sleep() {
+    sleep "$1" &
+    wait $!
+}
+
 # 判定是否已放行上网
 # 注意: 不能只 grep "204"。校园网已认证时 204 源返回 204，未认证时返回 302，
 # 若只认 204 会把"需要认证"和"完全不通"混为一谈；同时 301 也是正常的放行响应
@@ -46,15 +79,15 @@ logger -t esurfing-renew "开始执行清晨 05:30 租期无感刷新..."
 
 # 2. 刷新 WAN 口租约，给机房 BRAS 预留充分的注销释放时间 (避免撞上冷却期)
 ifdown wan >/dev/null 2>&1
-sleep 10
+renew_sleep 10
 ifup wan >/dev/null 2>&1
-sleep 5
+renew_sleep 5
 
 # 3. 确保以主通道 (Channel 1) 重新发起握手
 switch_channel 1
 
 /etc/init.d/esurfingclient start >/dev/null 2>&1
-sleep 8
+renew_sleep 8
 
 # 4. 首次验证: 如果成功上线，写入系统日志并安全退出
 if is_online; then
@@ -63,7 +96,7 @@ if is_online; then
 fi
 
 # 5. 若首次未放行 (可能遭遇算法池 cdy 5 或机房残留)，等待 15 秒二次验证
-sleep 15
+renew_sleep 15
 if is_online; then
     logger -t esurfing-renew "清晨会话在二次等待后上线！"
     exit 0
@@ -74,7 +107,7 @@ logger -t esurfing-renew "通道 1 握手受阻，自动故障转移至 iOS 通�
 switch_channel 4
 
 /etc/init.d/esurfingclient restart >/dev/null 2>&1
-sleep 8
+renew_sleep 8
 
 if is_online; then
     logger -t esurfing-renew "iOS 备用通道 4 握手成功，清晨续约完成！"

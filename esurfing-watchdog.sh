@@ -7,6 +7,7 @@
 
 FAIL_RECORD="/tmp/esurfing_watchdog_fails"
 COOL_RECORD="/tmp/esurfing_watchdog_cooldown"
+RENEW_LOCK="/tmp/esurfing_renew.lock"
 CONFIG_FILE="/etc/config/esurfingclient"
 RUN_LOG="/var/log/esurfing/logs/logs/run.log"
 
@@ -38,6 +39,20 @@ probe_state() {
 
     return 2
 }
+
+# 0. 清晨续约进行中则直接退出，避免两个脚本互相打断
+#    esurfing-renew.sh 会 ifdown wan 并停服务，期间的探测必然失败；
+#    必须放在 probe_state 之前，否则会白白累积失败计数
+if [ -f "$RENEW_LOCK" ]; then
+    RENEW_PID=$(cat "$RENEW_LOCK" 2>/dev/null || echo 0)
+    case "$RENEW_PID" in ''|*[!0-9]*) RENEW_PID=0 ;; esac
+    # 进程还在就跳过；进程已消失说明是残锁，清掉继续
+    if [ "$RENEW_PID" -ne 0 ] && kill -0 "$RENEW_PID" 2>/dev/null; then
+        logger -t esurfing-watchdog "清晨续约进行中 (pid $RENEW_PID)，跳过本次巡检"
+        exit 0
+    fi
+    rm -f "$RENEW_LOCK"
+fi
 
 probe_state
 STATE=$?
