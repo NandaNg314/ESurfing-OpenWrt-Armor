@@ -42,9 +42,11 @@ probe_state() {
 probe_state
 STATE=$?
 
-# 1. 在线: 清空失败计数与冷却记录，静默退出
+# 1. 在线: 只清空失败计数，静默退出
+#    注意不能删 COOL_RECORD —— 冷却期必须靠时间自然过期。否则"刚重启完 -> 网络短暂恢复
+#    -> 下一轮又判定需要认证"这条路径会立刻再次重启，冷却形同虚设
 if [ "$STATE" -eq 0 ]; then
-    rm -f "$FAIL_RECORD" "$COOL_RECORD"
+    rm -f "$FAIL_RECORD"
     exit 0
 fi
 
@@ -54,7 +56,7 @@ if [ "$STATE" -eq 2 ]; then
     probe_state
     STATE=$?
     if [ "$STATE" -eq 0 ]; then
-        rm -f "$FAIL_RECORD" "$COOL_RECORD"
+        rm -f "$FAIL_RECORD"
         exit 0
     fi
 fi
@@ -122,16 +124,25 @@ else
     logger -t esurfing-watchdog "检测到外网不可达 (连续 $FAILS 次, 当前通道: $CURRENT_CHN)"
 fi
 
-# 安全切换配置通道函数 (优先 jq 原子写入，无 jq 时平滑降级为 sed)
+# 安全切换配置通道函数
+# 优先 jq 原子写入 (遇到任何异常就放弃当前轮, 不清空配置文件)
+# 无 jq 时用 sed 精确替换第一处 "channel" 的值, 兼容 3 / "3" / "ios" 等写法
 switch_channel() {
     target_chn="$1"
     if command -v jq >/dev/null 2>&1; then
-        jq ".accounts[0].channel = $target_chn" "$CONFIG_FILE" > /tmp/esurfing_cfg.tmp && \
-            mv /tmp/esurfing_cfg.tmp "$CONFIG_FILE" && \
-            chmod 600 "$CONFIG_FILE"
-    else
-        sed -i "s/\"channel\": [0-9]/\"channel\": $target_chn/" "$CONFIG_FILE"
+        if jq ".accounts[0].channel = $target_chn" "$CONFIG_FILE" > /tmp/esurfing_cfg.tmp 2>/dev/null; then
+            mv /tmp/esurfing_cfg.tmp "$CONFIG_FILE" && chmod 600 "$CONFIG_FILE"
+            return 0
+        fi
+        rm -f /tmp/esurfing_cfg.tmp
+        logger -t esurfing-watchdog "通道切换失败 (jq 解析配置出错)，保持原通道"
+        return 1
     fi
+
+    # BusyBox sed 不支持 0,/re/ 地址范围 (会静默不生效)，
+    # 因此分两步替换: 先处理字符串写法 "ios"，再处理数字写法 3
+    sed -i 's/"channel"[[:space:]]*:[[:space:]]*"[^"]*"/"channel": '"$target_chn"'/' "$CONFIG_FILE"
+    sed -i 's/"channel"[[:space:]]*:[[:space:]]*[0-9][0-9]*/"channel": '"$target_chn"'/' "$CONFIG_FILE"
 }
 
 # 一次性自愈动作: 记录冷却时间后重启服务
@@ -152,19 +163,19 @@ case $FAILS in
             NEW_CHN=1
         fi
         logger -t esurfing-watchdog "阶段 2 故障转移: 切换至通道 $NEW_CHN 进行热备拨号..."
-        switch_channel "$NEW_CHN"
+        switch_channel "$NEW_CHN" && CURRENT_CHN="$NEW_CHN"
         heal_restart
         ;;
     3)
         logger -t esurfing-watchdog "阶段 3 故障转移: 切换至备用通道 5 (macOS)..."
-        switch_channel 5
+        switch_channel 5 && CURRENT_CHN=5
         heal_restart
         ;;
     *)
         # 连续失败 4 次以上: 大概率是学校断电/光纤中断/欠费，降频保底重试
         if [ $((FAILS % 3)) -eq 0 ]; then
             logger -t esurfing-watchdog "阶段 4 保底重试: 恢复为默认通道 1 重新唤醒..."
-            switch_channel 1
+            switch_channel 1 && CURRENT_CHN=1
             heal_restart
         fi
         ;;
