@@ -15,3 +15,6 @@ esurfingclient.json
 esurfingclient
 *.key
 *.pem
+
+# Local operations notes (contains real IPs, credentials, deployment state)
+LOCAL-NOTES.md
