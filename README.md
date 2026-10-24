@@ -419,13 +419,46 @@ sh /tmp/check-status.sh
   要认证 → 需解析 Portal 域名 → 需 DNS → 但 DNS 要认证后才通 → 认证不了
   ```
 
-- **30 秒判断法**（区分「DNS 死锁」和「真的没网」）：
-  ```sh
-  cat /tmp/resolv.conf.d/resolv.conf.auto      # 学校下发的 DNS（如 202.192.230.141）
-  ping -c2 223.5.5.5                            # 不通
-  ping -c2 202.192.230.141                      # 通   ← 这个组合 = 命中 DNS 死锁
-  ```
-  **「公网 DNS 不通 + 学校 DNS 通」= Portal 未认证拦截，不是网络故障，不要去查线路。**
+---
+
+#### 🔍 自查：你是不是 smartdns 用户里的「必中人群」
+
+> **smartdns 用户是最容易踩这个坑的一类**，因为默认部署方式就是「接管全部 DNS」，天然满足触发条件。
+
+逐条对号入座，**中 2 条以上基本就是这个问题**：
+
+```sh
+# ① 是否装了 smartdns 并接管了 dnsmasq
+opkg list-installed | grep -q smartdns && echo "装了 smartdns"
+uci get dhcp.@dnsmasq[0].server 2>/dev/null    # 出现 127.0.0.1#6053 之类 → 已被接管
+
+# ② dnsmasq 是否被设为不读系统 DNS（这是最关键的标志）
+uci get dhcp.@dnsmasq[0].noresolv 2>/dev/null
+#   返回 1 → dnsmasq 不会去读 resolv.conf.auto，也就拿不到学校 DNS
+
+# ③ smartdns 的上游里有没有学校 DNS
+cat /tmp/resolv.conf.d/resolv.conf.auto          # 学校下发的 DNS
+uci show smartdns | grep -E "\.ip='"
+#   如果上面这个学校 DNS 没出现在 smartdns 的 ip 列表里 → 死锁跑不掉
+
+# ④ 验证死锁是否存在
+ping -c2 223.5.5.5                                # 不通
+ping -c2 <学校DNS>                                # 通   ← 这个组合 = 确认死锁
+```
+
+**为什么 smartdns 用户必中**：
+
+| smartdns 的典型配置 | 后果 |
+| :--- | :--- |
+| `noresolv='1'`（接管 DNS 的标准做法） | dnsmasq **不再读** `resolv.conf.auto`，学校 DNS 被丢弃 |
+| `server='127.0.0.1#6053'` | 所有解析强制走 smartdns |
+| smartdns 上游只配公网 DNS（默认模板就是） | 未认证时**全部超时**，链路断死 |
+
+三个条件凑齐，就组成了一个闭环：**学校 DNS 明明下发到手了，却因为 `noresolv=1` 被丢掉，而 smartdns 又没有任何一个能在未认证时工作的上游。**
+
+> **注意**：`noresolv='1'` 本身**没有错**，它是 smartdns 正常工作的前提。错的是**上游遗漏了学校 DNS**。所以修法是「补上游」，**不是**去改 `noresolv`。
+
+---
 
 - **解决方案**：把**学校 DNS** 加为 DNS 软件的上游之一。以 smartdns 为例：
   ```sh
@@ -441,7 +474,26 @@ sh /tmp/check-status.sh
   uci set smartdns.@server[-1].type='udp'
   uci commit smartdns
   /etc/init.d/smartdns restart
+
+  # 3. 验证：重启认证，冷缓存下也应能自己认证成功
+  /etc/init.d/esurfingclient restart
+  sleep 60 && curl -4 -s -o /dev/null -w '%{http_code}\n' http://connect.rom.miui.com/generate_204
+  #   204 = 成功
   ```
+
+  **⚠️ 验证时务必先清缓存**，否则可能是过期缓存让你误以为修好了：
+  ```sh
+  /etc/init.d/smartdns stop; rm -f /etc/smartdns/smartdns.cache; /etc/init.d/smartdns start
+  ```
+
+- **其他 DNS 软件的对应做法**：
+
+  | 软件 | 加学校 DNS 的位置 |
+  | :--- | :--- |
+  | **smartdns** | `uci add smartdns server`（上方命令），或 `custom.conf` 里加 `server <学校DNS>` |
+  | **AdGuard Home** | 网页后台 → 设置 → DNS 设置 → 上游 DNS 服务器，追加学校 DNS |
+  | **mosdns** | 配置文件的 `forward` / `upstream` 列表中追加学校 DNS |
+  | **dnsmasq（原生）** | 无需操作。`noresolv='0'` 时它会自动读 `resolv.conf.auto`，天然包含学校 DNS |
 
 - **⚠️ 学校 DNS 是 DHCP 动态下发的，会变**。硬编码迟早失效，届时死锁复现。推荐用本仓库的
   [`sync-school-dns.sh`](./sync-school-dns.sh) 自动跟随（见下方文件清单），IP 变化时自动同步，平时零开销。
