@@ -622,7 +622,7 @@ ping -c2 <学校DNS>                                # 通   ← 这个组合 = �
 
 1. **[BadGhost520/ESurfingClient-CVersion](https://github.com/BadGhost520/ESurfingClient-CVersion)**
    - **作者**：[BadGhost520](https://github.com/BadGhost520)
-   - **致谢说明**：本项目核心拨号认证引擎直接采用了该项目编译的 OpenWrt 原生 C 语言客户端。该项目成功攻克并实现了广东/江苏等地电信天翼校园客户端 2024 年升级后的动态 ZSM 算法、Ticket 质询与 CDC-HTTP-PAP 协议握手，是本方案得以完全免电脑运行的核心技术支柱。
+   - **致谢说明**：本项目核心拨号认证引擎直接采用了该项目编译的 OpenWrt 原生 C 语言客户端。该项目成功攻克并实现了广东电信天翼校园客户端 2024 年升级后的动态 ZSM 算法、Ticket 质询与 CDC-HTTP-PAP 协议握手，是本方案得以完全免电脑运行的核心技术支柱。
 2. **[Pandaft/ESurfingPy-CLI](https://github.com/Pandaft/ESurfingPy-CLI)**
    - **作者**：[Pandaft](https://github.com/Pandaft)
    - **致谢说明**：在协议逆向分析阶段，参考了该项目对广东天翼校园网 Portal 接口字段规范、错误状态码字典（如 `13018000`）的梳理。
