@@ -462,29 +462,51 @@ ping -c2 <学校DNS>                                # 通   ← 这个组合 = �
 
 - **解决方案**：把**学校 DNS** 加为 DNS 软件的上游之一。以 smartdns 为例：
   ```sh
-  # 1. 查出学校 DNS
-  cat /tmp/resolv.conf.d/resolv.conf.auto
+  # 1. 自动取出学校 DNS（无需知道具体是多少，不同学校不一样）
+  SCHOOL_DNS=$(grep '^nameserver' /tmp/resolv.conf.d/resolv.conf.auto 2>/dev/null | head -n1 | awk '{print $2}')
+  echo "本校 DNS: $SCHOOL_DNS"
+  #   ⚠️ 如果这里是空的，说明 WAN 不是 DHCP 模式（如静态 IP / PPPoE），
+  #     请向学校网络中心确认 DNS，或见下方「非 DHCP 情况」说明。
 
-  # 2. 加入 smartdns 上游（IP 替换为上一步查到的值）
+  # 2. 加入 smartdns 上游（直接引用上面的变量，不要硬编码别人学校的 IP）
   uci add smartdns server
   uci set smartdns.@server[-1].enabled='1'
   uci set smartdns.@server[-1].name='SchoolDNS'
-  uci set smartdns.@server[-1].ip='202.192.230.141'
+  uci set smartdns.@server[-1].ip="$SCHOOL_DNS"
   uci set smartdns.@server[-1].port='53'
   uci set smartdns.@server[-1].type='udp'
   uci commit smartdns
   /etc/init.d/smartdns restart
 
-  # 3. 验证：重启认证，冷缓存下也应能自己认证成功
+  # 3. 验证：先清缓存，再重启认证，冷缓存下也应能自己认证成功
+  /etc/init.d/smartdns stop; rm -f /etc/smartdns/smartdns.cache; /etc/init.d/smartdns start
   /etc/init.d/esurfingclient restart
   sleep 60 && curl -4 -s -o /dev/null -w '%{http_code}\n' http://connect.rom.miui.com/generate_204
   #   204 = 成功
   ```
 
-  **⚠️ 验证时务必先清缓存**，否则可能是过期缓存让你误以为修好了：
+  **⚠️ 必须清缓存验证**，否则 `serve-expired` 的过期缓存会造成「看着修好了其实没修」的假象。
+
+- **更省事的做法**：直接用本仓库的
+  [`sync-school-dns.sh`](./sync-school-dns.sh)，它**自动从 DHCP 读取学校 DNS**，
+  不写死任何 IP，学校换了也会自动跟随：
   ```sh
-  /etc/init.d/smartdns stop; rm -f /etc/smartdns/smartdns.cache; /etc/init.d/smartdns start
+  cp sync-school-dns.sh /usr/bin/ && chmod 755 /usr/bin/sync-school-dns.sh
+  /usr/bin/sync-school-dns.sh     # 手动跑一次立即生效
   ```
+  再挂到 hotplug，WAN 每次拿到地址时自动同步：
+  ```sh
+  cat > /etc/hotplug.d/iface/99-sync-school-dns <<'HOOK'
+  #!/bin/sh
+  [ "$ACTION" = "ifup" ] || [ "$ACTION" = "ifupdate" ] || exit 0
+  case "$INTERFACE" in wan*) /usr/bin/sync-school-dns.sh ;; esac
+  HOOK
+  chmod 755 /etc/hotplug.d/iface/99-sync-school-dns
+  ```
+
+- **非 DHCP 情况**（WAN 用静态 IP / PPPoE，拿不到自动下发的 DNS）：
+  `resolv.conf.auto` 会是空的，脚本会自动跳过、不做任何破坏性操作。
+  此时需要手动向学校网络中心确认 DNS，并用上面的「步骤 2」手工填入。
 
 - **其他 DNS 软件的对应做法**：
 
