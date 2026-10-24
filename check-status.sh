@@ -2,7 +2,7 @@
 # ==============================================================================
 # ESurfing-OpenWrt-Armor
 # OpenWrt 广东天翼校园网认证与防检测网关一键健康诊断脚本
-# 项目主页: https://github.com/your-username/ESurfing-OpenWrt-Armor
+# 项目主页: https://github.com/NandaNg314/ESurfing-OpenWrt-Armor
 # ==============================================================================
 
 COLOR_GREEN='\033[0;32m'
@@ -147,10 +147,31 @@ echo ""
 
 # 4. 外网联通性检测
 info "4. 测试公网真实联通性..."
+
+# 4.1 先取学校 DNS（由校园网 DHCP 下发），用于区分「DNS 死锁」与「真的没网」
+SCHOOL_DNS=$(grep '^nameserver' /tmp/resolv.conf.d/resolv.conf.auto 2>/dev/null | head -n1 | awk '{print $2}')
+# 兼容旧版本路径
+[ -n "$SCHOOL_DNS" ] || SCHOOL_DNS=$(grep '^nameserver' /tmp/resolv.conf.auto 2>/dev/null | head -n1 | awk '{print $2}')
+
 if ping -c 2 -W 3 223.5.5.5 >/dev/null 2>&1; then
     pass "公共 DNS (223.5.5.5) 连通测试通过"
 else
-    fail "无法 ping 通公共 DNS 223.5.5.5，请检查网络认证状态"
+    # 公网 DNS 不通时，必须区分「Portal 未认证拦截」和「真实断网」
+    if [ -n "$SCHOOL_DNS" ] && ping -c 2 -W 3 "$SCHOOL_DNS" >/dev/null 2>&1; then
+        warn "公网 DNS (223.5.5.5) 不通，但学校 DNS ($SCHOOL_DNS) 可达"
+        warn "  → 这是「Portal 未认证」的特征，不是线路故障。请勿查线路，直接查认证状态。"
+        # 进一步判断是否是 DNS 软件上游缺少学校 DNS 导致的死锁
+        if [ -f /etc/config/smartdns ]; then
+            if uci show smartdns 2>/dev/null | grep -q "\.ip='${SCHOOL_DNS}'"; then
+                pass "  smartdns 上游已包含学校 DNS，死锁风险已排除；问题在认证本身"
+            else
+                fail "  smartdns 上游缺少学校 DNS ($SCHOOL_DNS)！这将导致「认证↔DNS」死锁"
+                fail "  修复：见 README FAQ Q7，或运行 /usr/bin/sync-school-dns.sh"
+            fi
+        fi
+    else
+        fail "无法 ping 通公共 DNS 223.5.5.5，且学校 DNS 也不可达，请检查 WAN 口与物理链路"
+    fi
 fi
 
 HTTP_CODE=$(curl -s -m 5 -o /dev/null -w "%{http_code}" "http://connect.rom.miui.com/generate_204" 2>/dev/null || echo "000")
@@ -158,6 +179,16 @@ if [ "$HTTP_CODE" = "204" ]; then
     pass "HTTP 探测 (generate_204) 返回 204，网络已完全打通且无 Portal 网页拦截！"
 elif [ "$HTTP_CODE" = "302" ] || [ "$HTTP_CODE" = "301" ]; then
     fail "HTTP 探测发生 302 重定向，当前网络被 Portal 拦截，说明客户端未认证成功或欠费"
+elif [ "$HTTP_CODE" = "000" ]; then
+    # 000 通常是 DNS 解析失败（域名查不到），也可能是连接被丢
+    warn "HTTP 探测返回 000（多为域名解析失败），尝试用裸 IP 二次确认..."
+    IP_CODE=$(curl -s -m 5 -o /dev/null -w "%{http_code}" "http://220.181.104.183/generate_204" 2>/dev/null || echo "000")
+    if [ "$IP_CODE" != "000" ]; then
+        fail "裸 IP 可达 ($IP_CODE) 但域名不可达 → 确认是 DNS 解析故障，不是断网"
+        fail "  请检查 dnsmasq / smartdns 上游，以及 FAQ Q7（校园网 DNS 死锁）"
+    else
+        warn "裸 IP 同样不可达，请结合上方 DNS 三态判定结论综合判断"
+    fi
 else
     warn "HTTP 探测返回代码: $HTTP_CODE"
 fi

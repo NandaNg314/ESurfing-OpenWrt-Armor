@@ -67,6 +67,7 @@
 | [`check-status.sh`](./check-status.sh) | Shell 脚本 | **一键状态健康自检脚本**（检查网卡、IP、拨号进程、防火墙计数、外网 DNS 与 204 放行、看门狗与定时计划） |
 | [`esurfing-watchdog.sh`](./esurfing-watchdog.sh) | Shell 脚本 | **双通道网络自愈看门狗**（三态探针区分 204 在线 / 302 需认证 / 完全不可达，带 120 秒冷却期，遭遇机房踢线或算法缺陷时跨通道自动故障转移，打破退避死等） |
 | [`esurfing-renew.sh`](./esurfing-renew.sh) | Shell 脚本 | **清晨优雅租期重置与保活脚本**（清晨主动带冷释放重置会话，预留机房释放缓冲与自检，彻底重置 48 小时租期） |
+| [`sync-school-dns.sh`](./sync-school-dns.sh) | Shell 脚本 | **学校 DNS 自动同步**（把校园网 DHCP 下发的学校 DNS 自动同步为 smartdns 上游，防止 DNS 软件导致「认证↔DNS」死锁，IP 不变时零开销） |
 | [`40-ttl-mangle.nft`](./40-ttl-mangle.nft) | nftables 规则 | OpenWrt 23.05+ (fw4) 原生出向流量锁定 TTL/HopLimit=64 规则片段 |
 | [`esurfingclient.example.json`](./esurfingclient.example.json) | 配置模板 | 天翼校园客户端脱敏配置文件模板（严格限制为 `chmod 600`，内置 Windows 客户端 Channel 1 通道参数） |
 | [`README.md`](./README.md) | 文档 | 完整通用部署指南、架构原理与深度故障避坑图谱 |
@@ -391,6 +392,61 @@ sh /tmp/check-status.sh
      - **尊重主程序自愈**：完全不可达且主程序日志中已有 `网络错误, 等待 10 秒后重试` / `需要认证` / `获取 Ticket 失败` 记录时跳过自愈，交由主程序自身的退避重试与 procd 兜底，不做无谓打断；
      - **120 秒冷却期**：每次自愈后写入冷却时间戳，冷却期内不再动作。官方首次退避为 60 秒、机房注销冷却期为 30~60 秒，低于 120 秒的连续重启只会撞上注销窗口并制造 `获取 Ticket 失败`；
      - **跨通道智能故障转移（Failover）**：若当前通道（如 Windows 通道 1）重试依然失败，看门狗会自动无感切换为 iOS 通道（通道 4）或 macOS 通道（通道 5）发起热备拨号，彻底规避单一算法分支的兼容性死锁。
+
+### Q7：装了 smartdns / AdGuard Home / mosdns 后，认证程序反复失败、日志报「联网检测全部失败」？
+
+> **这是 v2.2.0 才暴露出来的高频坑，v2.1.5 及以下不会遇到。**
+
+- **现象**：认证进程反复退出，日志循环如下：
+  ```
+  [WARN] [CheckNetwork.c:208] 联网检测全部失败: hicloud/dns=0 hicloud/ip1=0 hicloud/ip2=0 miui/dns=0 ...
+  [WARN] [DialerNet.c:339] 网络错误, 重试: 第 1 次, 最多 5 次
+  [FATAL] [DialerNet.c:336] 超过最多重试次数
+  ```
+  或提示 `还没拿到认证页面地址 (last_location 为空): 请先用浏览器打开任意 http 网站触发跳转`。
+
+- **根因一（版本差异，关键）**：**v2.2.0 移除了备用 IP 兜底**。
+
+  | 版本 | 联网检测目标 | DNS 坏掉时 |
+  | :--- | :--- | :--- |
+  | v2.1.5 | `connect.rom.miui.com` + **`http://1.1.1.1` 兜底** | 降级到 IP URL，**照常认证成功** |
+  | **v2.2.0** | `connect.rom.miui.com` + `connectivitycheck.platform.hicloud.com`（**两者都是域名，无 IP 兜底**） | **直接 FATAL 退出** |
+
+  > 实测：v2.2.0 二进制中 `1.1.1.1` 出现次数为 **0**。所以 **DNS 一旦不可用，v2.2.0 100% 卡死在第一步，连认证请求都不会发出**。
+
+- **根因二（DNS 死锁）**：校园网在**未认证状态**下，Portal 会拦截所有公网 DNS（腾讯 / 阿里 / 火山 / 114 全部超时），**只放行学校自己的 DNS**。若你的 DNS 软件（smartdns / AdGuard / mosdns）上游配置的全是公网 DNS，就会形成死锁：
+  ```
+  要认证 → 需解析 Portal 域名 → 需 DNS → 但 DNS 要认证后才通 → 认证不了
+  ```
+
+- **30 秒判断法**（区分「DNS 死锁」和「真的没网」）：
+  ```sh
+  cat /tmp/resolv.conf.d/resolv.conf.auto      # 学校下发的 DNS（如 202.192.230.141）
+  ping -c2 223.5.5.5                            # 不通
+  ping -c2 202.192.230.141                      # 通   ← 这个组合 = 命中 DNS 死锁
+  ```
+  **「公网 DNS 不通 + 学校 DNS 通」= Portal 未认证拦截，不是网络故障，不要去查线路。**
+
+- **解决方案**：把**学校 DNS** 加为 DNS 软件的上游之一。以 smartdns 为例：
+  ```sh
+  # 1. 查出学校 DNS
+  cat /tmp/resolv.conf.d/resolv.conf.auto
+
+  # 2. 加入 smartdns 上游（IP 替换为上一步查到的值）
+  uci add smartdns server
+  uci set smartdns.@server[-1].enabled='1'
+  uci set smartdns.@server[-1].name='SchoolDNS'
+  uci set smartdns.@server[-1].ip='202.192.230.141'
+  uci set smartdns.@server[-1].port='53'
+  uci set smartdns.@server[-1].type='udp'
+  uci commit smartdns
+  /etc/init.d/smartdns restart
+  ```
+
+- **⚠️ 学校 DNS 是 DHCP 动态下发的，会变**。硬编码迟早失效，届时死锁复现。推荐用本仓库的
+  [`sync-school-dns.sh`](./sync-school-dns.sh) 自动跟随（见下方文件清单），IP 变化时自动同步，平时零开销。
+
+- **顺带提醒**：DNS 软件的上游里保留学校 DNS **不会削弱优选效果**。`response-mode fastest-ip` 仍是多上游并发竞争取最快，学校 DNS 只是多了一个候选，不独占、不屏蔽常规域名。
 
 ---
 
