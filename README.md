@@ -98,6 +98,38 @@
 
 ## 🚀 通用部署教程（全机型适用）
 
+### ⚠️ 部署前必读：客户端版本差异
+
+本项目兼容 `esurfingclient` **v2.1.5** 与 **v2.2.0+**，两者在**联网检测逻辑**上有关键差异，
+直接影响部署要求。**先确认自己的版本，再决定是否需要额外的 DNS 配置。**
+
+```sh
+opkg list-installed | grep esurfingclient
+# 或
+/usr/bin/esurfingclient --help 2>&1 | head -3
+```
+
+| 对比项 | v2.1.5 | v2.2.0+ |
+| :--- | :--- | :--- |
+| 联网检测目标 | `miui/generate_204` + **`http://1.1.1.1`（IP 兜底）** | `miui/generate_204` + `hicloud/generate_204`（**全部是域名**） |
+| DNS 不可用时 | 降级到 IP URL，**仍能完成认证** | **直接 `FATAL` 退出**，连认证请求都不发 |
+| 日志表现 | 大量 `主检测 URL 无法连通` 降级提示（**无害**） | 失败即明确报错，平时日志很干净 |
+| 对 DNS 的要求 | 宽松 | **严格** |
+
+> 实测佐证：v2.2.0 二进制中 `1.1.1.1` 出现次数为 **0**，即 IP 兜底已被移除。
+
+**怎么选：**
+
+- **用 v2.2.0+（推荐）** — 日志干净、错误信息详细（会直接告诉你 `6=域名解析失败` / `28=连接超时`）。
+  但**如果你用了 smartdns / AdGuard Home / mosdns 等接管 DNS 的软件，请务必先读 [FAQ Q7](#faq)**，
+  否则会在第一步 `FATAL` 退出。
+- **用 v2.1.5** — 对 DNS 要求宽松，兼容性好。代价是日志噪音多，
+  且**它的 IP 兜底会掩盖 DNS 故障**（看起来一切正常，直到兜底也失效才爆发）。
+
+**✅ 如果你没装任何 DNS 软件（用原生 dnsmasq）**：两个版本都可以直接按教程部署，无需额外配置。
+
+---
+
 ### 步骤 1：查询路由器架构并安装拨号核心
 
 不同型号的路由器对应不同的 CPU 架构。请先通过 SSH 登录 OpenWrt 路由器终端（默认通常为 `ssh root@192.168.1.1` 或自定义 LAN IP）。
@@ -338,6 +370,32 @@ sh /tmp/check-status.sh
   /etc/init.d/esurfingclient status
   ```
 
+### 3. 版本回滚（升级 v2.2.0 后无法正常工作时）
+
+如果升级后认证反复失败，可以先回滚到旧版**临时恢复网络**：
+
+```sh
+# 1. 备份当前版本
+cp /usr/bin/esurfingclient /root/esurfingclient.$(date +%s).bak
+
+# 2. 恢复旧版二进制（从你自己的备份，或重新下载旧版 ipk）
+cp /root/esurfingclient-2.1.5-r1.bin /usr/bin/esurfingclient
+chmod 755 /usr/bin/esurfingclient
+
+# 3. 重启验证
+/etc/init.d/esurfingclient restart
+sleep 60
+curl -s -o /dev/null -w '%{http_code}\n' http://connect.rom.miui.com/generate_204
+#   204 = 成功
+```
+
+> ⚠️ **不推荐长期靠旧版规避问题。**
+> v2.1.5 的 IP 兜底会**掩盖 DNS 故障**——网络看起来正常，实际 DNS 早就坏了，
+> 直到兜底也失效那天才集体爆发（这是本项目遇到过的真实案例：DNS 从配置 smartdns 那天起就是坏的，
+> 因为兜底一直能用，一年都没发现）。
+>
+> **回滚只用于临时救急，根本问题（DNS 上游）仍应修好后再升回 v2.2.0。**
+
 ---
 
 ## ❓ 常见问题与技术避坑指南 (FAQ)
@@ -396,6 +454,40 @@ sh /tmp/check-status.sh
 ### Q7：装了 smartdns / AdGuard Home / mosdns 后，认证程序反复失败、日志报「联网检测全部失败」？
 
 > **这是 v2.2.0 才暴露出来的高频坑，v2.1.5 及以下不会遇到。**
+
+#### ⚡ 先做这一步：30 秒判断你是否需要读本节
+
+**没装任何 DNS 软件的用户请直接跳过本节**——原生 dnsmasq 会自动读取学校 DHCP 下发的 DNS，不存在这个问题。
+
+```sh
+uci get dhcp.@dnsmasq[0].noresolv 2>/dev/null || echo "未设置(默认 0)"
+```
+
+| 返回值 | 你的情况 | 需要处理吗 |
+| :--- | :--- | :--- |
+| `0` 或「未设置」 | **原生 dnsmasq**，或装了 DNS 软件但未接管全部 DNS | ❌ **不用管，跳过本节** |
+| `1` | 有软件**接管了全部 DNS** | ⬇️ **继续往下读** |
+
+**两种状态的本质区别**：
+
+```
+noresolv = 0（默认）
+    → dnsmasq 自动读 /tmp/resolv.conf.d/resolv.conf.auto
+    → 里面就是学校 DHCP 下发的 DNS
+    → 未认证时也能解析 → 认证正常完成 ✅
+
+noresolv = 1
+    → dnsmasq 不再读系统 DNS，学校 DNS 被丢弃
+    → 若 DNS 软件上游又没有它 → 死锁 ❌
+```
+
+> **本节适用人群**：使用了 smartdns / AdGuard Home / mosdns 等，**且设置成「接管全部 DNS」**的用户。
+> 只是装了但没接管的，`noresolv` 仍是 `0`，不受影响。
+>
+> 💡 **即使你现在没装任何 DNS 软件，也建议记住这条命令**：将来装了任何 DNS 插件后，
+> 先跑一次确认 `noresolv` 的值，能避免莫名其妙认证失败。
+
+---
 
 - **现象**：认证进程反复退出，日志循环如下：
   ```
