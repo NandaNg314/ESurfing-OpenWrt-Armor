@@ -149,18 +149,31 @@ opkg list-installed | grep esurfingclient
    | **Qualcomm IPQ5000 / IPQ6000 / IPQ807x** | `arm_cortex-a7_neon-vfpv4` / `aarch64` | 各类高通方案 Wi-Fi 6 路由器 |
    | **x86 软路由** | `x86_64` | J4125、N5105、各类工控机 / PVE / ESXi 虚拟机 |
 
-3. **下载并安装上游二进制包**：  
-   前往 [BadGhost520/ESurfingClient-CVersion Releases](https://github.com/BadGhost520/ESurfingClient-CVersion/releases) 页面，下载对应架构的 `.ipk` 安装包上传至路由器 `/tmp` 目录（以 `v2.1.5-r1` 为例）：
+3. **下载并安装上游二进制包**：
+
+   前往 [BadGhost520/ESurfingClient-CVersion Releases](https://github.com/BadGhost520/ESurfingClient-CVersion/releases) 页面，
+   按第 1 步查到的架构下载对应 `.ipk`，上传至路由器 `/tmp` 目录。
+
+   > 💡 **建议使用最新版**（截至 2026-10 为 `v2.2.0-r2`）。
+   > 版本选择的理由与注意事项见上方「[部署前必读：客户端版本差异](#️-部署前必读客户端版本差异)」——
+   > 若你使用了 smartdns / AdGuard Home / mosdns 等接管 DNS 的软件，
+   > **装 v2.2.0 前务必先读 [FAQ Q7](#faq)**，否则认证会在第一步直接 `FATAL` 退出。
+
    ```bash
    cd /tmp
-   # 以 aarch64 (如 AX3000T) 为例：
-   wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.1.5-r1/esurfingclient_2.1.5-1_aarch64_cortex-a53.ipk
-   # 以 mipsel_24kc (如 MT7621) 为例：
-   # wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.1.5-r1/esurfingclient_2.1.5-1_mipsel_24kc.ipk
+
+   # 以 mipsel_24kc（小米路由 3G/4、红米 AC2100 等 MT7621 机型）为例，v2.2.0-r2：
+   wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.2.0-r2/esurfingclient_2.2.0-2_mipsel_24kc.ipk
+
+   # 以 aarch64_cortex-a53（小米 AX3000T、红米 AX6000 等 MT7981 机型）为例，v2.2.0-r2：
+   # wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.2.0-r2/esurfingclient_2.2.0-2_aarch64_cortex-a53.ipk
 
    # 执行安装
    opkg install esurfingclient_*.ipk
    ```
+
+   > 📌 上面 URL 中的版本号会随上游发布变化。若链接失效，请到 Releases 页面
+   > 找到当前最新 tag，把 URL 里的 `v2.2.0-r2` 和文件名中的 `2.2.0-2` 一并替换即可。
 
 ---
 
