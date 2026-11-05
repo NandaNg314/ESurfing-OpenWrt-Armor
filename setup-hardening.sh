@@ -119,21 +119,28 @@ else
     warn "-> 未在 firewall 配置中找到名为 Allow-Ping 的规则，请按需手动检查"
 fi
 
-# 6. 关闭硬件流量加速 (保留软件流加速，防止硬件 NAT 绕过防火墙导致出向 TTL 伪装穿透)
-info "步骤 5/6: 优化流量转发加速策略 (关闭硬件加速，确保出向 TTL 100% 被改写)..."
+# 6. 关闭硬件流量加速 (保留软件流加速，防止硬件 NAT 绕过防火墙导致出向 TTL 伪装穿透，并避免 MT7621 等机型 PPE 崩溃硬重启)
+info "步骤 5/6: 优化流量转发加速策略 (关闭硬件加速，确保出向 TTL 100% 被改写，杜绝内核 Panic)..."
 if uci get firewall.@defaults[0].flow_offloading_hw >/dev/null 2>&1; then
     uci set firewall.@defaults[0].flow_offloading_hw='0'
     uci commit firewall
     info "-> 已禁用 flow_offloading_hw (杜绝硬件 PPE 绕过 Netfilter)"
 fi
 
-# 7. 部署断网秒级自愈看门狗与清晨 48 小时租期预防性刷新
-info "步骤 6/6: 配置断网秒级自愈看门狗与清晨优雅续约计划..."
+if [ -f /etc/config/turboacc ]; then
+    uci set turboacc.config.hw_flow='0' 2>/dev/null || true
+    uci set turboacc.config.hw_wed='0' 2>/dev/null || true
+    uci commit turboacc 2>/dev/null || true
+    info "-> 已禁用 turboacc 硬件加速 (杜绝 Turbo ACC 开机自动重新开启硬件流)"
+fi
+
+# 7. 部署清晨 48 小时租期预防性刷新与定时维护计划
+info "步骤 6/6: 配置清晨 48 小时租期优雅续约与定时维护计划..."
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ -f "$SCRIPT_DIR/esurfing-watchdog.sh" ]; then
     cp "$SCRIPT_DIR/esurfing-watchdog.sh" /usr/bin/esurfing-watchdog.sh
     chmod +x /usr/bin/esurfing-watchdog.sh
-    info "-> 已安装自愈看门狗脚本至 /usr/bin/esurfing-watchdog.sh"
+    info "-> 已备份备用看门狗脚本至 /usr/bin/esurfing-watchdog.sh (可选维护工具)"
 fi
 
 if [ -f "$SCRIPT_DIR/esurfing-renew.sh" ]; then
@@ -144,18 +151,20 @@ fi
 
 mkdir -p /etc/crontabs
 touch /etc/crontabs/root
+
+# 清理历史遗留的高频看门狗任务 (v2.2.1+ 已自带原生单调钟 Watchdog 与 6 阶自愈，高频强杀会导致触发 35 分钟防频控休眠)
+sed -i '/esurfing-watchdog.sh/d' /etc/crontabs/root 2>/dev/null || true
+sed -i '/每 2 分钟网络健康看门狗/d' /etc/crontabs/root 2>/dev/null || true
+sed -i '/esurfingclient restart/d' /etc/crontabs/root 2>/dev/null || true
+
 CRON_MODIFIED=0
 if ! grep -q 'esurfing-renew.sh' /etc/crontabs/root 2>/dev/null; then
-    # 清理可能存在的旧版 restart 任务
-    sed -i '/esurfingclient restart/d' /etc/crontabs/root 2>/dev/null || true
     cat << 'EOF' >> /etc/crontabs/root
 # 每天清晨 05:30 优雅刷新租期 (带冷释放与自动通道热备，防踢线防假死)
 30 5 * * * /usr/bin/esurfing-renew.sh >/dev/null 2>&1
-# 每 2 分钟网络健康看门狗：断网自动秒级自愈，打破指数退避长等待
-*/2 * * * * /usr/bin/esurfing-watchdog.sh >/dev/null 2>&1
 EOF
     CRON_MODIFIED=1
-    info "-> 已注入清晨防踢线与自愈看门狗计划任务"
+    info "-> 已注入清晨 05:30 优雅租期重置计划任务 (预防性清零 48 小时机房硬顶)"
 fi
 
 if ! grep -q 'rotate.log' /etc/crontabs/root 2>/dev/null; then

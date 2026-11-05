@@ -24,14 +24,16 @@
 - **100% 路由器独立运行**：路由器开机全自主完成握手、Ticket 获取与心跳保活；电脑无需开机，随开随关。
 - **攻克电信动态挑战（AutoZSM）**：集成应对电信升级后的 **动态 ZSM 算法**，原生支持 Windows/iOS/macOS 多通道私有协议。
 - **直击根源解决业务限制**：走原生客户端私有协议通道，彻底避开 `13018000`（Web锁死）与 `140010`（客户端本地IP比对）。
-- **双通道智能热备与秒级自愈**：
-  - 内置智能网络看门狗（`esurfing-watchdog.sh`），三态探针区分「需要认证」与「完全断网」，仅在确认需要重新认证时自动打破官方指数退避死等，并带 120 秒自愈冷却期；
-  - 遇到特定算法挑战异常时，自动跨通道故障转移（Windows ⇄ iOS ⇄ macOS），实现 100% 韧性自愈。
+- **拥抱最新守护架构与纯净自愈**：
+  - **最新 v2.2.1+ 原生内核级看门狗协同**：上游新版已内置单调钟 `Watchdog` 线程与 6 阶快速心跳自愈，彻底告别外部脚本粗暴杀进程打破退避的旧时代，避免触发机房与客户端的频控惩罚；
+  - **保留应急跨通道热备（Failover）**：提供可选的双通道故障转移脚本（`esurfing-watchdog.sh`），在遭遇特定算法缺陷或通道临时失效时支持一键跨通道调度（Windows ⇄ iOS ⇄ macOS）。
 - **清晨无感会话重置**：每天清晨 05:30 自动静默刷新一次会话，清零电信机房 48 小时租期，彻底杜绝白天/晚间黄金用网期被踢线。
 - **OpenWrt 23.05 内核级防共享伪装装甲**：
   - **TTL / Hop Limit 强制锁定**：出向 IPv4 与 IPv6 数据包强制改写为 `64`，彻底抹除路由转发跳数痕迹。
   - **NTP 时钟流量内网劫持**：局域网 UDP 123 端口授时请求自动重定向至路由器本地时钟源，消除各设备硬件时钟频偏特征。
   - **暴露特征隐身**：禁用 UPnP、LLTD 拓扑发现及外网 ICMP Ping 响应，隐藏路由器网络暴露面。
+- **芯片级防崩溃加固（关键避坑）**：
+  - 强制关闭导致 MT7621 等机型在 Wi-Fi 高并发下触发内核 Panic 猝死硬重启的硬件加速（`flow_offloading_hw=0`），兼顾千兆纯软加速与 100% 长期不宕机。
 - **工业级稳定性与闪存保护**：
   - 由 OpenWrt `procd` 守护进程接管，异常崩溃 5 秒自动拉起。
   - 运行日志与临时状态严格受限于内存盘（`tmpfs`），零闪存磨损。
@@ -63,9 +65,9 @@
 
 | 文件 | 类型 | 用途说明 |
 | :--- | :--- | :--- |
-| [`setup-hardening.sh`](./setup-hardening.sh) | Shell 脚本 | **OpenWrt 一键防多设备检测加固脚本**（自动注入出向 TTL=64、配置 NTP 局域网劫持、隐藏路由特征并部署全套自愈系统） |
-| [`check-status.sh`](./check-status.sh) | Shell 脚本 | **一键状态健康自检脚本**（检查网卡、IP、拨号进程、防火墙计数、外网 DNS 与 204 放行、看门狗与定时计划） |
-| [`esurfing-watchdog.sh`](./esurfing-watchdog.sh) | Shell 脚本 | **双通道网络自愈看门狗**（三态探针区分 204 在线 / 302 需认证 / 完全不可达，带 120 秒冷却期，遭遇机房踢线或算法缺陷时跨通道自动故障转移，打破退避死等） |
+| [`setup-hardening.sh`](./setup-hardening.sh) | Shell 脚本 | **OpenWrt 一键防多设备检测加固脚本**（自动注入出向 TTL=64、配置 NTP 局域网劫持、隐藏路由特征、关闭崩溃级硬件流加速并部署清晨续约系统） |
+| [`check-status.sh`](./check-status.sh) | Shell 脚本 | **一键状态健康自检脚本**（检查网卡、IP、拨号进程、防火墙计数、外网 DNS 与 204 放行、硬件流加速配置与定时计划） |
+| [`esurfing-watchdog.sh`](./esurfing-watchdog.sh) | Shell 脚本 | **双通道网络故障转移脚本（可选）**（三态探针区分 204 在线 / 302 需认证 / 完全不可达，带 120 秒冷却期，主要用于特定算法缺陷时手动/低频跨通道热备） |
 | [`esurfing-renew.sh`](./esurfing-renew.sh) | Shell 脚本 | **清晨优雅租期重置与保活脚本**（清晨主动带冷释放重置会话，预留机房释放缓冲与自检，彻底重置 48 小时租期） |
 | [`sync-school-dns.sh`](./sync-school-dns.sh) | Shell 脚本 | **学校 DNS 自动同步**（把校园网 DHCP 下发的学校 DNS 自动同步为 smartdns 上游，防止 DNS 软件导致「认证↔DNS」死锁，IP 不变时零开销） |
 | [`40-ttl-mangle.nft`](./40-ttl-mangle.nft) | nftables 规则 | OpenWrt 23.05+ (fw4) 原生出向流量锁定 TTL/HopLimit=64 规则片段 |
@@ -98,10 +100,9 @@
 
 ## 🚀 通用部署教程（全机型适用）
 
-### ⚠️ 部署前必读：客户端版本差异
+### ⚠️ 部署前必读：客户端版本选择（强烈推荐 v2.2.1+）
 
-本项目兼容 `esurfingclient` **v2.1.5** 与 **v2.2.0+**，两者在**联网检测逻辑**上有关键差异，
-直接影响部署要求。**先确认自己的版本，再决定是否需要额外的 DNS 配置。**
+本项目全面推荐并深度适配 `esurfingclient` **v2.2.1-r7+ 最新版**。不同阶段版本在**核心健壮性与自愈逻辑**上有质的飞跃：
 
 ```sh
 opkg list-installed | grep esurfingclient
@@ -109,24 +110,19 @@ opkg list-installed | grep esurfingclient
 /usr/bin/esurfingclient --help 2>&1 | head -3
 ```
 
-| 对比项 | v2.1.5 | v2.2.0+ |
-| :--- | :--- | :--- |
-| 联网检测目标 | `miui/generate_204` + **`http://1.1.1.1`（IP 兜底）** | `miui/generate_204` + `hicloud/generate_204`（**全部是域名**） |
-| DNS 不可用时 | 降级到 IP URL，**仍能完成认证** | **直接 `FATAL` 退出**，连认证请求都不发 |
-| 日志表现 | 大量 `主检测 URL 无法连通` 降级提示（**无害**） | 失败即明确报错，平时日志很干净 |
-| 对 DNS 的要求 | 宽松 | **严格** |
+| 对比维度 | v2.1.5 (老旧版) | v2.2.0 (过渡版) | v2.2.1+ (最新推荐版, 如 v2.2.1-r7) |
+| :--- | :--- | :--- | :--- |
+| **自愈守护架构** | 依赖外部脚本强杀服务打破退避 | 仍存在退避死等，易陷入等待 | **内置单调钟 `Watchdog.c` 守护线程**，卡死自动自杀由 `procd` 秒级拉起 |
+| **心跳断线重试** | 粗暴退出或长间隔等待 | 失败即退避 | **6 阶快速退避（1s~30s, 61秒自愈窗口）**，网络抖动静默自愈 |
+| **防锁号风控保护** | ❌ 无频控，易被机房封号 | ❌ 无频控 | **60 秒内登录 2 次即自动休眠 35 分钟**，彻底杜绝短时频繁认证被拉黑 |
+| **联网检测** | `generate_204` + `1.1.1.1` IP 兜底 | 纯双域名检测（无 IP 兜底） | **并发双路（DNS + 固定 IP）并行探测**，3s 连接 / 4s 超时极速收敛 |
+| **对外部看门狗的需求**| 需常驻外部 2 分钟看门狗 | 需外部看门狗打破退避 | **严禁外部频繁杀进程**（会误触发 35 分钟防频控休眠），完全由原生状态机接管 |
+| **日志纯净度** | 大量探测失败噪音 | 报错清晰，日常较多心跳日志 | **日常心跳降为 DEBUG**，Syslog 极度纯净，零 Flash/内存损耗 |
 
-> 实测佐证：v2.2.0 二进制中 `1.1.1.1` 出现次数为 **0**，即 IP 兜底已被移除。
-
-**怎么选：**
-
-- **用 v2.2.0+（推荐）** — 日志干净、错误信息详细（会直接告诉你 `6=域名解析失败` / `28=连接超时`）。
-  但**如果你用了 smartdns / AdGuard Home / mosdns 等接管 DNS 的软件，请务必先读 [FAQ Q7](#faq)**，
-  否则会在第一步 `FATAL` 退出。
-- **用 v2.1.5** — 对 DNS 要求宽松，兼容性好。代价是日志噪音多，
-  且**它的 IP 兜底会掩盖 DNS 故障**（看起来一切正常，直到兜底也失效才爆发）。
-
-**✅ 如果你没装任何 DNS 软件（用原生 dnsmasq）**：两个版本都可以直接按教程部署，无需额外配置。
+**强烈推荐直接使用 v2.2.1+（最新版）**：
+- 日志极度纯净、错误定位精准、自带高健壮性单调钟 Watchdog。
+- **特别提醒**：新版本自带完善自愈与频控保护，**本项目部署时已默认移除每 2 分钟的外挂强杀看门狗**，避免外部脚本打断原生的 61 秒自愈并触发 35 分钟锁定。
+- ⚠️ **唯一前置要求**：如果你使用了 `smartdns` / `AdGuard Home` / `mosdns` 等接管 DNS 的软件，**安装前务必先阅读 [FAQ Q7](#faq)**（运行 `sync-school-dns.sh` 同步学校 DNS），避免在未认证状态下陷入「认证↔DNS」死锁。
 
 ---
 
@@ -154,26 +150,27 @@ opkg list-installed | grep esurfingclient
    前往 [BadGhost520/ESurfingClient-CVersion Releases](https://github.com/BadGhost520/ESurfingClient-CVersion/releases) 页面，
    按第 1 步查到的架构下载对应 `.ipk`，上传至路由器 `/tmp` 目录。
 
-   > 💡 **建议使用最新版**（截至 2026-10 为 `v2.2.0-r2`）。
-   > 版本选择的理由与注意事项见上方「[部署前必读：客户端版本差异](#️-部署前必读客户端版本差异)」——
+   > 💡 **建议使用最新版**（推荐当前最新的 `v2.2.1-r7`）。
    > 若你使用了 smartdns / AdGuard Home / mosdns 等接管 DNS 的软件，
-   > **装 v2.2.0 前务必先读 [FAQ Q7](#faq)**，否则认证会在第一步直接 `FATAL` 退出。
+   > **安装前务必先读 [FAQ Q7](#faq)**，否则认证会在第一步直接因无法解析而退出。
 
    ```bash
    cd /tmp
 
-   # 以 mipsel_24kc（小米路由 3G/4、红米 AC2100 等 MT7621 机型）为例，v2.2.0-r2：
-   wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.2.0-r2/esurfingclient_2.2.0-2_mipsel_24kc.ipk
+   # 以 mipsel_24kc（小米路由 3G/4、红米 AC2100 等 MT7621 机型）为例，最新 v2.2.1-r7：
+   wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.2.1-r7/esurfingclient_2.2.1-7_mipsel_24kc.ipk
+   wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.2.1-r7/luci-app-esurfingclient_2.2.1-7_all.ipk
 
-   # 以 aarch64_cortex-a53（小米 AX3000T、红米 AX6000 等 MT7981 机型）为例，v2.2.0-r2：
-   # wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.2.0-r2/esurfingclient_2.2.0-2_aarch64_cortex-a53.ipk
+   # 以 aarch64_cortex-a53（小米 AX3000T、红米 AX6000 等 MT7981 机型）为例，最新 v2.2.1-r7：
+   # wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.2.1-r7/esurfingclient_2.2.1-7_aarch64_cortex-a53.ipk
+   # wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.2.1-r7/luci-app-esurfingclient_2.2.1-7_all.ipk
 
-   # 执行安装
-   opkg install esurfingclient_*.ipk
+   # 执行安装 (建议主程序与 LuCI 界面一同安装)
+   opkg install esurfingclient_*.ipk luci-app-esurfingclient_*.ipk
    ```
 
    > 📌 上面 URL 中的版本号会随上游发布变化。若链接失效，请到 Releases 页面
-   > 找到当前最新 tag，把 URL 里的 `v2.2.0-r2` 和文件名中的 `2.2.0-2` 一并替换即可。
+   > 找到当前最新 tag，把 URL 里的 `v2.2.1-r7` 和文件名中的版本号一并替换即可。
 
 ---
 
@@ -242,15 +239,15 @@ chmod 600 /etc/config/esurfingclient
 
 #### 方案 A：一键加固脚本（强烈推荐）
 
-将仓库中的全部脚本（`setup-hardening.sh`、`esurfing-watchdog.sh`、`esurfing-renew.sh`、`check-status.sh`）上传至路由器 `/tmp` 目录并执行：
+将仓库中的脚本（`setup-hardening.sh`、`esurfing-renew.sh`、`check-status.sh`，以及可选的 `esurfing-watchdog.sh`）上传至路由器 `/tmp` 目录并执行：
 
 ```bash
 cd /tmp
-chmod +x setup-hardening.sh esurfing-watchdog.sh esurfing-renew.sh check-status.sh
+chmod +x setup-hardening.sh esurfing-renew.sh check-status.sh
 sh setup-hardening.sh
 ```
 
-*脚本会自动完成出向 TTL/HL=64 规则注入、本地 NTP 授时服务启用与局域网重定向劫持、关闭 UPnP/LLTD、屏蔽外网 Ping，并自动安装双通道自愈看门狗与清晨 05:30 优雅租期重置脚本。*
+*脚本会自动完成出向 TTL/HL=64 规则注入、本地 NTP 授时服务启用与局域网重定向劫持、关闭 UPnP/LLTD、屏蔽外网 Ping、关闭导致内核 Panic 猝死重启的硬件流加速，并自动配置清晨 05:30 优雅租期重置计划任务（针对 v2.2.1+ 最新版自动清理外部高频冲突看门狗）。*
 
 ---
 
@@ -304,30 +301,34 @@ sh setup-hardening.sh
    uci commit firewall
    ```
 
-4. **关闭芯片级硬件流加速（关键避坑）**：
+4. **关闭芯片级硬件流加速（核心避坑，防路由器硬重启与 TTL 穿透）**：
    ```bash
    # 保留软件流加速，禁用硬件加速 (flow_offloading_hw=0)
-   # 防止芯片硬件 NAT 引擎绕过 Netfilter 防火墙导致出向 TTL=64 伪装穿透失效
+   # 彻底根治 MT7621 等机型在 Wi-Fi 高并发下 PPE 硬件表崩溃引发的内核 Panic 硬重启
    uci set firewall.@defaults[0].flow_offloading_hw='0' 2>/dev/null
    uci commit firewall
+
+   # 若固件安装了 Turbo ACC 插件，务必同步关闭 turboacc 中的硬件流加速与硬件 WED
+   if [ -f /etc/config/turboacc ]; then
+       uci set turboacc.config.hw_flow='0' 2>/dev/null
+       uci set turboacc.config.hw_wed='0' 2>/dev/null
+       uci commit turboacc 2>/dev/null
+   fi
 
    # 重载防火墙使全部加固规则生效
    /etc/init.d/firewall restart
    ```
 
-5. **部署双通道自愈看门狗与清晨优雅续约计划**：
+5. **部署清晨优雅租期重置计划（预防 48 小时机房踢线）**：
    ```bash
-   # 安装看门狗与续约脚本
-   cp esurfing-watchdog.sh /usr/bin/esurfing-watchdog.sh
+   # 安装清晨优雅续约脚本
    cp esurfing-renew.sh /usr/bin/esurfing-renew.sh
-   chmod +x /usr/bin/esurfing-watchdog.sh /usr/bin/esurfing-renew.sh
+   chmod +x /usr/bin/esurfing-renew.sh
 
-   # 挂载计划任务
+   # 挂载计划任务 (v2.2.1+ 自带单调钟 Watchdog 与 6 阶自愈，无需外部每 2 分钟挂载看门狗)
    cat << 'EOF' >> /etc/crontabs/root
-   # 每天清晨 05:30 优雅刷新租期 (带冷释放与自动通道热备，防踢线防假死)
+   # 每天清晨 05:30 优雅刷新租期 (带冷释放与自检，彻底重置机房 48 小时租期)
    30 5 * * * /usr/bin/esurfing-renew.sh >/dev/null 2>&1
-   # 每 2 分钟网络健康看门狗：断网自动秒级自愈，打破指数退避长等待
-   */2 * * * * /usr/bin/esurfing-watchdog.sh >/dev/null 2>&1
    # 每月 1 号凌晨 04:00 自动清理历史轮转日志兜底 (防 tmpfs 内存盘溢出)
    0 4 1 * * rm -f /tmp/log/esurfing/logs/logs/*.rotate.log 2>/dev/null
    EOF
@@ -450,19 +451,16 @@ curl -s -o /dev/null -w '%{http_code}\n' http://connect.rom.miui.com/generate_20
 ### Q6：怎么避免电信 48 小时租期到期踢线与断网长时间等待？
 - **痛点深度拆解**：
   1. **机房 48 小时强制下线**：电信机房对每次宽带认证设置了约 48 小时的单次会话租期硬顶。若上次拨号在晚上，跑满 48 小时后恰好会在晚间黄金用网期触发被踢下线；
-  2. **官方指数退避机制导致的假死现象**：
-     - 当断线后重新发起握手时，若恰好遇到电信机房物理端口 30~60 秒的会话注销冷却期，或机房动态下发了特定算法挑战分支（如 Windows 通道的 `cdy 5`），会导致首次 Ticket 获取返回空响应；
-     - 此时官方客户端会触发指数退避机制（重试间隔迅速递增至 `60s -> 300s(5分) -> 600s(10分) -> 1200s(20分)`），导致虽然机房早已允许连接，客户端却在倒计时中休眠干等。
-- **解决方案（本项目双重高可用加固保障）**：
-  1. **源头预防（清晨 05:30 优雅租期重置 `esurfing-renew.sh`）**：
-     - **杜绝盲目重启撞冷却**：若在 05:30 机械执行服务重启，由于旧会话刚登出，极易撞上机房 30~60 秒注销冷却期而首次失败。本项目专属脚本 `esurfing-renew.sh` 在停用服务后，**主动下线 WAN 口并休眠 10 秒**，为机房 BRAS 预留充足的旧会话注销时间；
-     - **重新握手与自检闭环**：重新拉起 WAN 口并启动服务后，脚本会**主动探测 204 放行状态**；若首次握手偶遇算法池异常（如 cdy 5），脚本会在 15 秒内**自动切换至 iOS 通道 4 重新握手**，确保清晨 05:31 之前 100% 确认网络通畅才退出，全宿舍早晨醒来无感可用；
-     - **清零 48 小时计时器**：每天清晨自动将租期倒计时归零，**48 小时强制踢线永远不会在白天或晚间用网高峰期发生**！
-  2. **底线自愈（双通道热备看门狗 `esurfing-watchdog.sh`）**：
-     - **三态探针（关键）**：判定口径与主程序 `CheckNetwork.c` 完全一致——`204`/`301` 视为在线、`302` 视为需要认证、全部不可达视为断网。**只有「需要认证」才触发自愈**，避免把主程序已经用 `1.1.1.1` 兜底判为在线的瞬时抖动误判为断网；
-     - **尊重主程序自愈**：完全不可达且主程序日志中已有 `网络错误, 等待 10 秒后重试` / `需要认证` / `获取 Ticket 失败` 记录时跳过自愈，交由主程序自身的退避重试与 procd 兜底，不做无谓打断；
-     - **120 秒冷却期**：每次自愈后写入冷却时间戳，冷却期内不再动作。官方首次退避为 60 秒、机房注销冷却期为 30~60 秒，低于 120 秒的连续重启只会撞上注销窗口并制造 `获取 Ticket 失败`；
-     - **跨通道智能故障转移（Failover）**：若当前通道（如 Windows 通道 1）重试依然失败，看门狗会自动无感切换为 iOS 通道（通道 4）或 macOS 通道（通道 5）发起热备拨号，彻底规避单一算法分支的兼容性死锁。
+  2. **OpenWrt 后台进程无 48 小时重连**：反编译与源码分析证实，OpenWrt 守护进程以 `--role auth` 启动，主循环中根本没有主动重连逻辑，完全被动等待机房踢线；
+  3. **即使客户端重连也是从开机算起**：若你在晚上 20:30 重启了路由器，48 小时到期依然在两天后的 20:30 黄金开黑期断网！
+- **解决方案（本项目核心神器 `esurfing-renew.sh`）**：
+  - **清晨 05:30 优雅租期重置**：
+    - **杜绝盲目重启撞冷却**：若在 05:30 机械执行服务重启，由于旧会话刚登出，极易撞上机房 30~60 秒注销冷却期而首次失败。本项目专属脚本 `esurfing-renew.sh` 在停用服务后，**主动下线 WAN 口并休眠 10 秒**，为机房 BRAS 预留充足的旧会话注销时间；
+    - **重新握手与自检闭环**：重新拉起 WAN 口并启动服务后，脚本会**主动探测 204 放行状态**；确认 100% 通畅后才退出；
+    - **清零 48 小时计时器**：每天清晨自动将租期倒计时归零，**48 小时强制踢线永远不会在白天或晚间用网高峰期发生**！
+  - **关于外部看门狗 `esurfing-watchdog.sh` 的退役说明**：
+    - 在旧版（v2.1.5）客户端下，断网后指数退避较长，外部看门狗每 2 分钟强制重启打破死等；
+    - **在 v2.2.1+ 最新版下，强烈建议停止挂载每 2 分钟的外挂看门狗**！因为新版已内置单调钟 Watchdog 线程与 6 阶快速自愈，外部频繁杀进程会打断原生的 61 秒自愈，甚至触发新版 `60 秒内登录 2 次即休眠 35 分钟` 的防锁风控。将日常守护全权交由原生状态机 + procd 即可。
 
 ### Q7：装了 smartdns / AdGuard Home / mosdns 后，认证程序反复失败、日志报「联网检测全部失败」？
 
@@ -626,6 +624,33 @@ ping -c2 <学校DNS>                                # 通   ← 这个组合 = �
   [`sync-school-dns.sh`](./sync-school-dns.sh) 自动跟随（见下方文件清单），IP 变化时自动同步，平时零开销。
 
 - **顺带提醒**：DNS 软件的上游里保留学校 DNS **不会削弱优选效果**。`response-mode fastest-ip` 仍是多上游并发竞争取最快，学校 DNS 只是多了一个候选，不独占、不屏蔽常规域名。
+
+### Q8：为什么路由器（如小米 3G、红米 AC2100、新路由 3 等 MT7621 机型）在 Wi-Fi 高并发或多设备连网时突然莫名其妙猝死硬重启？
+
+- **现象描述**：
+  平时上网正常，但宿舍几台手机/电脑同时连上 Wi-Fi 刷视频、下载大文件或打游戏时，路由器突然所有指示灯熄灭或闪烁，**整机瞬间断电式硬重启**；重启后查看系统日志没有任何报错，闪存崩溃日志也是空的。
+- **底层根因（芯片级 PPE 硬件加速陷阱）**：
+  这是由于开启了 **芯片硬件流加速 (`flow_offloading_hw=1` / MediaTek PPE HWNAT)** 造成的致命内核崩溃！
+  1. **MT7621 根本没有无线硬件卸载引擎**：MT7621 芯片的 PPE 引擎仅针对 MT7530 有线以太网交换芯片，硬件上根本不支持 MT7603/MT7612 无线芯片的流卸载（无线硬件卸载 WED 是新一代 Filogic 芯片的专属）。
+  2. **网桥流表错位引发内核 Panic**：当 OpenWrt 防火墙开启硬件加速时，系统会将无线 AP 接口（`phy0-ap0`/`phy1-ap0`）硬塞入 `flags offload` 流表。多台设备连 Wi-Fi 发起高并发连接时，数据帧触发 MediaTek PPE 描述符环错位与内存越界访问（触发内核 Oops: `Kernel panic - not syncing: Fatal exception`）。配合 Linux 默认的 `panic=3`，系统在 3 秒内直接触发 SoC 硬件复位立即硬重启！
+- **彻底解决办法**：
+  **必须彻底关闭硬件流量加速 (`flow_offloading_hw=0`)，只保留纯软件流量加速 (`flow_offloading=1`)**。
+  MT7621 双核四线程 880MHz 跑纯软件 Fastpath（nft_flow_offload）跑满千兆线速毫无压力，CPU 占用极低，且 100% 稳定绝不再猝死：
+  ```sh
+  # 1. 关闭防火墙硬件流加速
+  uci set firewall.@defaults[0].flow_offloading_hw='0'
+  uci commit firewall
+
+  # 2. 若安装了 Turbo ACC 插件，务必同步关闭 turboacc 的硬件加速 (防止开机被重置)
+  if [ -f /etc/config/turboacc ]; then
+      uci set turboacc.config.hw_flow='0'
+      uci set turboacc.config.hw_wed='0'
+      uci commit turboacc
+  fi
+
+  # 3. 重启防火墙生效
+  /etc/init.d/firewall restart
+  ```
 
 ---
 

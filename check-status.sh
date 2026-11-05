@@ -143,6 +143,17 @@ else
     warn "WAN 口仍开启了 Allow-Ping 响应规则"
 fi
 
+# 3.6 检查硬件流量加速 (必须禁用，防止出向 TTL 改写穿透及 MT7621 等机型 PPE 崩溃)
+HW_FLOW=$(uci get firewall.@defaults[0].flow_offloading_hw 2>/dev/null || echo "0")
+TURBO_HW_FLOW=$(uci get turboacc.config.hw_flow 2>/dev/null || echo "0")
+if [ "$HW_FLOW" = "0" ] && [ "$TURBO_HW_FLOW" = "0" ]; then
+    pass "硬件流加速已正确禁用 (避免芯片 PPE 异常崩溃并确保 TTL 伪装 100% 生效)"
+else
+    fail "检测到硬件流加速已启用 (firewall=$HW_FLOW, turboacc=$TURBO_HW_FLOW)！"
+    fail "  这可能导致 MT7621 等机型在 Wi-Fi 高并发时触发内核 Panic 硬重启，且会导致出向 TTL 穿透"
+    fail "  修复建议：执行 setup-hardening.sh 或手动关闭 flow_offloading_hw"
+fi
+
 echo ""
 
 # 4. 外网联通性检测
@@ -195,12 +206,19 @@ fi
 
 echo ""
 
-# 5. 检查网络自愈看门狗与定时任务
-info "5. 检查自愈看门狗与定时维护计划..."
-if [ -x "/usr/bin/esurfing-watchdog.sh" ]; then
-    pass "自愈看门狗脚本已安装且具备执行权限 (/usr/bin/esurfing-watchdog.sh)"
+# 5. 检查自愈机制与定时维护计划
+info "5. 检查守护自愈架构与定时维护计划..."
+
+# 检测客户端版本 (v2.2.1+ 已自带原生 Watchdog 线程与 6 阶快速退避)
+CLIENT_VER=$(opkg list-installed 2>/dev/null | grep -E "^esurfingclient " | awk '{print $3}' || true)
+[ -n "$CLIENT_VER" ] || CLIENT_VER=$(/usr/bin/esurfingclient --version 2>&1 | grep -oE "v?[0-9]+\.[0-9]+\.[0-9]+(-r[0-9]+)?" | head -n1 || echo "未知")
+
+if echo "$CLIENT_VER" | grep -qE "2\.2\.[1-9]|2\.[3-9]\."; then
+    pass "当前为 esurfingclient $CLIENT_VER 现代化版本 (内置单调钟 Watchdog 与 6 阶自愈)"
+    IS_MODERN=1
 else
-    warn "未检测到可执行的自愈看门狗脚本，建议运行 setup-hardening.sh 安装"
+    info "当前客户端版本: $CLIENT_VER"
+    IS_MODERN=0
 fi
 
 if [ -x "/usr/bin/esurfing-renew.sh" ]; then
@@ -210,16 +228,25 @@ else
 fi
 
 CRON_JOB=$(crontab -l 2>/dev/null || cat /etc/crontabs/root 2>/dev/null || true)
-if echo "$CRON_JOB" | grep -q "esurfing-watchdog.sh"; then
-    pass "Crontab 每 2 分钟自愈看门狗任务已挂载"
-else
-    warn "Crontab 中未找到 esurfing-watchdog.sh 任务"
-fi
-
 if echo "$CRON_JOB" | grep -q "esurfing-renew.sh"; then
-    pass "Crontab 每天清晨 05:30 优雅续约任务已挂载"
+    pass "Crontab 每天清晨 05:30 优雅续约任务已挂载 (预防 48 小时踢线)"
 else
     warn "Crontab 中未找到清晨 05:30 优雅续约任务 (esurfing-renew.sh)"
+fi
+
+if echo "$CRON_JOB" | grep -q "esurfing-watchdog.sh"; then
+    if [ "$IS_MODERN" -eq 1 ]; then
+        warn "检测到 Crontab 中仍挂载了每 2 分钟 esurfing-watchdog.sh 任务！"
+        warn "  在 v2.2.1+ 下外部高频重启可能打断上游优雅自愈并误触发 35 分钟防频控休眠，建议移除"
+    else
+        pass "Crontab 每 2 分钟自愈看门狗任务已挂载 (旧版兼容模式)"
+    fi
+else
+    if [ "$IS_MODERN" -eq 1 ]; then
+        pass "现代化纯净守护架构已生效 (无需高频外部看门狗，全权由原生 Watchdog + procd 接管)"
+    else
+        warn "Crontab 中未找到 esurfing-watchdog.sh 任务 (旧版本建议挂载)"
+    fi
 fi
 
 if echo "$CRON_JOB" | grep -q "rotate.log"; then
