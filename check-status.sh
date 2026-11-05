@@ -136,11 +136,16 @@ else
 fi
 
 # 3.5 检查 WAN 口 ICMP Ping 响应
-ALLOW_PING=$(uci show firewall 2>/dev/null | grep "Allow-Ping" | grep -v "\.enabled='0'" || true)
-if [ -z "$ALLOW_PING" ]; then
-    pass "WAN 口外网 ICMP Ping 响应已关闭 (防网络扫描探测)"
+ALLOW_PING_IDX=$(uci show firewall 2>/dev/null | grep "name='Allow-Ping'" | sed -n "s/.*@rule\[\([0-9]*\)\].*/\1/p" | head -n1)
+if [ -n "$ALLOW_PING_IDX" ]; then
+    ALLOW_PING_STATUS=$(uci get "firewall.@rule[$ALLOW_PING_IDX].enabled" 2>/dev/null || echo "1")
+    if [ "$ALLOW_PING_STATUS" = "0" ]; then
+        pass "WAN 口外网 ICMP Ping 响应已关闭 (防网络扫描探测)"
+    else
+        warn "WAN 口仍开启了 Allow-Ping 响应规则"
+    fi
 else
-    warn "WAN 口仍开启了 Allow-Ping 响应规则"
+    pass "WAN 口外网 ICMP Ping 响应已关闭 (未配置 Allow-Ping 规则)"
 fi
 
 # 3.6 检查硬件流量加速 (必须禁用，防止出向 TTL 改写穿透及 MT7621 等机型 PPE 崩溃)
