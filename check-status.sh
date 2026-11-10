@@ -73,6 +73,16 @@ else
     fail "esurfingclient 未运行，请检查 /etc/init.d/esurfingclient start"
 fi
 
+# 检查配置文件路径 (兼容新版 /etc/esurfingclient 与旧版 /etc/config)
+CFG_DIR=$(uci -q get esurfingclient.config.dir 2>/dev/null || echo "/etc/esurfingclient")
+if [ -f "$CFG_DIR/ESurfingClient.json" ]; then
+    pass "找到主配置文件: $CFG_DIR/ESurfingClient.json (v2.3.0+ 标准路径)"
+elif [ -f "/etc/config/esurfingclient" ] && grep -q "accounts" /etc/config/esurfingclient; then
+    pass "找到主配置文件: /etc/config/esurfingclient (旧版兼容路径)"
+else
+    warn "未找到有效的 ESurfing 配置文件，请检查 $CFG_DIR/ESurfingClient.json"
+fi
+
 LOG_FILE="/var/log/esurfing/logs/logs/run.log"
 if [ -f "$LOG_FILE" ]; then
     pass "找到认证日志文件: $LOG_FILE"

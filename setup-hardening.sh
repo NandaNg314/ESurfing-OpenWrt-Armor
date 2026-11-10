@@ -149,6 +149,11 @@ if [ -f "$SCRIPT_DIR/esurfing-renew.sh" ]; then
     info "-> 已安装清晨优雅续约脚本至 /usr/bin/esurfing-renew.sh"
 fi
 
+# 严格保护账号配置文件权限 (chmod 600，兼容新旧路径)
+CFG_DIR=$(uci -q get esurfingclient.config.dir 2>/dev/null || echo "/etc/esurfingclient")
+[ -f "$CFG_DIR/ESurfingClient.json" ] && chmod 600 "$CFG_DIR/ESurfingClient.json" 2>/dev/null || true
+[ -f "/etc/config/esurfingclient" ] && chmod 600 "/etc/config/esurfingclient" 2>/dev/null || true
+
 mkdir -p /etc/crontabs
 touch /etc/crontabs/root
 

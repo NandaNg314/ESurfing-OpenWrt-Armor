@@ -100,9 +100,9 @@
 
 ## 🚀 通用部署教程（全机型适用）
 
-### ⚠️ 部署前必读：客户端版本选择（强烈推荐 v2.2.1+）
+### ⚠️ 部署前必读：客户端版本选择（强烈推荐 v2.3.1+）
 
-本项目全面推荐并深度适配 `esurfingclient` **v2.2.1-r7+ 最新版**。不同阶段版本在**核心健壮性与自愈逻辑**上有质的飞跃：
+本项目全面推荐并深度适配 `esurfingclient` **v2.3.1-r5+ 最新版**。不同阶段版本在**核心健壮性、算法密钥池与配置架构**上有质的飞跃：
 
 ```sh
 opkg list-installed | grep esurfingclient
@@ -110,18 +110,18 @@ opkg list-installed | grep esurfingclient
 /usr/bin/esurfingclient --help 2>&1 | head -3
 ```
 
-| 对比维度 | v2.1.5 (老旧版) | v2.2.0 (过渡版) | v2.2.1+ (最新推荐版, 如 v2.2.1-r7) |
+| 对比维度 | v2.1.5 (老旧版) | v2.2.1-r7 (稳定版) | v2.3.1+ (最新推荐版, 如 v2.3.1-r5) |
 | :--- | :--- | :--- | :--- |
-| **自愈守护架构** | 依赖外部脚本强杀服务打破退避 | 仍存在退避死等，易陷入等待 | **内置单调钟 `Watchdog.c` 守护线程**，卡死自动自杀由 `procd` 秒级拉起 |
-| **心跳断线重试** | 粗暴退出或长间隔等待 | 失败即退避 | **6 阶快速退避（1s~30s, 61秒自愈窗口）**，网络抖动静默自愈 |
-| **防锁号风控保护** | ❌ 无频控，易被机房封号 | ❌ 无频控 | **60 秒内登录 2 次即自动休眠 35 分钟**，彻底杜绝短时频繁认证被拉黑 |
-| **联网检测** | `generate_204` + `1.1.1.1` IP 兜底 | 纯双域名检测（无 IP 兜底） | **并发双路（DNS + 固定 IP）并行探测**，3s 连接 / 4s 超时极速收敛 |
-| **对外部看门狗的需求**| 需常驻外部 2 分钟看门狗 | 需外部看门狗打破退避 | **严禁外部频繁杀进程**（会误触发 35 分钟防频控休眠），完全由原生状态机接管 |
-| **日志纯净度** | 大量探测失败噪音 | 报错清晰，日常较多心跳日志 | **日常心跳降为 DEBUG**，Syslog 极度纯净，零 Flash/内存损耗 |
+| **自愈守护架构** | 依赖外部脚本强杀服务打破退避 | 内置单调钟 `Watchdog.c` 守护线程 | **单调钟 Watchdog + 进程监管体系**，卡死自动自杀由 `procd` 秒级拉起 |
+| **Windows 密钥池** | 旧版算法表，易遭遇密钥失效 | 支持基础 Windows 通道 | **按探测结果重构裁剪算法表**，补齐 25 组新密钥，动态算号极速通过 |
+| **学习认证地址** | 静态截取 | 依赖特定重定向 | **恢复从 302 自动学习认证地址**，认证服务器动态测速自选，gwip 自动绑定网关 |
+| **配置架构 (OpenWrt)**| 纯 JSON 裸写在 `/etc/config` (易冲撞 UCI)| 纯 JSON 裸写在 `/etc/config` | **标准解耦**：配置归档至 `/etc/esurfingclient/ESurfingClient.json`，UCI 仅管目录 |
+| **心跳与退避机制** | 粗暴退出或长间隔等待 | 6 阶快速退避（1s~30s） | **区分网络抖动与服务端拒绝**，连续两次 302 才重认，防锁号风控安全休眠 |
+| **防锁号风控保护** | ❌ 无频控，易被机房封号 | 60 秒内登录 2 次休眠 35 分钟 | **机房风控多重防护**，杜绝短时频繁认证被拉黑封号 |
 
-**强烈推荐直接使用 v2.2.1+（最新版）**：
-- 日志极度纯净、错误定位精准、自带高健壮性单调钟 Watchdog。
-- **特别提醒**：新版本自带完善自愈与频控保护，**本项目部署时已默认移除每 2 分钟的外挂强杀看门狗**，避免外部脚本打断原生的 61 秒自愈并触发 35 分钟锁定。
+**强烈推荐直接使用 v2.3.1+（最新版）**：
+- 完美适配广东电信 2026 最新认证服务器测速与 302 自动重定向。
+- 架构规范，不再冲撞 OpenWrt 的 UCI 机制。
 - ⚠️ **唯一前置要求**：如果你使用了 `smartdns` / `AdGuard Home` / `mosdns` 等接管 DNS 的软件，**安装前务必先阅读 [FAQ Q7](#faq)**（运行 `sync-school-dns.sh` 同步学校 DNS），避免在未认证状态下陷入「认证↔DNS」死锁。
 
 ---
@@ -150,27 +150,26 @@ opkg list-installed | grep esurfingclient
    前往 [BadGhost520/ESurfingClient-CVersion Releases](https://github.com/BadGhost520/ESurfingClient-CVersion/releases) 页面，
    按第 1 步查到的架构下载对应 `.ipk`，上传至路由器 `/tmp` 目录。
 
-   > 💡 **建议使用最新版**（推荐当前最新的 `v2.2.1-r7`）。
+   > 💡 **建议使用最新版**（推荐当前最新的 `v2.3.1-r5`）。
    > 若你使用了 smartdns / AdGuard Home / mosdns 等接管 DNS 的软件，
    > **安装前务必先读 [FAQ Q7](#faq)**，否则认证会在第一步直接因无法解析而退出。
 
    ```bash
    cd /tmp
 
-   # 以 mipsel_24kc（小米路由 3G/4、红米 AC2100 等 MT7621 机型）为例，最新 v2.2.1-r7：
-   wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.2.1-r7/esurfingclient_2.2.1-7_mipsel_24kc.ipk
-   wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.2.1-r7/luci-app-esurfingclient_2.2.1-7_all.ipk
+   # 以 mipsel_24kc（小米路由 3G/4、红米 AC2100 等 MT7621 机型）为例，最新 v2.3.1-r5：
+   wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.3.1-r5/esurfingclient_2.3.1-5_mipsel_24kc.ipk
+   wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.3.1-r5/luci-app-esurfingclient_2.3.1-5_all.ipk
 
-   # 以 aarch64_cortex-a53（小米 AX3000T、红米 AX6000 等 MT7981 机型）为例，最新 v2.2.1-r7：
-   # wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.2.1-r7/esurfingclient_2.2.1-7_aarch64_cortex-a53.ipk
-   # wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.2.1-r7/luci-app-esurfingclient_2.2.1-7_all.ipk
+   # 以 aarch64_cortex-a53（小米 AX3000T、红米 AX6000 等 MT7981 机型）为例，最新 v2.3.1-r5：
+   # wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.3.1-r5/esurfingclient_2.3.1-5_aarch64_cortex-a53.ipk
+   # wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.3.1-r5/luci-app-esurfingclient_2.3.1-5_all.ipk
 
    # 执行安装 (建议主程序与 LuCI 界面一同安装)
    opkg install esurfingclient_*.ipk luci-app-esurfingclient_*.ipk
    ```
 
-   > 📌 上面 URL 中的版本号会随上游发布变化。若链接失效，请到 Releases 页面
-   > 找到当前最新 tag，把 URL 里的 `v2.2.1-r7` 和文件名中的版本号一并替换即可。
+   > 📌 若国内网络下载 GitHub Releases 较慢，可在 URL 前添加反代加速前缀（如 `https://ghproxy.net/https://github.com/...`）。
 
 ---
 
@@ -191,14 +190,21 @@ ifdown wan && ifup wan
 
 ### 步骤 3：配置认证凭据
 
-创建并编辑 `/etc/config/esurfingclient`，填入你的宽带账号与密码（文件权限必须设为 `600`，杜绝密码泄露）：
+> 💡 **版本配置路径说明**：
+> - **v2.3.0+（最新版）**：配置 JSON 标准路径为 `/etc/esurfingclient/ESurfingClient.json`（系统通过 `/etc/config/esurfingclient` 里的 `option dir '/etc/esurfingclient'` 引导）；
+> - **v2.2.x 及以下旧版**：配置 JSON 位于 `/etc/config/esurfingclient`。
+
+创建并编辑配置文件（以最新版为例），填入你的宽带账号与密码（文件权限必须设为 `600`，杜绝密码泄露）：
 
 ```bash
-cat << 'EOF' > /etc/config/esurfingclient
+# 确保配置目录就绪
+mkdir -p /etc/esurfingclient
+
+cat << 'EOF' > /etc/esurfingclient/ESurfingClient.json
 {
   "enabled": true,
   "web_external_acc": false,
-  "log_lv": 2,
+  "log_lv": 4,
   "log_dir": "/var/log/esurfing/logs",
   "conn_timeout": 7,
   "op_timeout": 10,
@@ -216,7 +222,7 @@ cat << 'EOF' > /etc/config/esurfingclient
 EOF
 
 # 严格锁定凭据文件权限
-chmod 600 /etc/config/esurfingclient
+chmod 600 /etc/esurfingclient/ESurfingClient.json
 ```
 
 > **参数说明**：
@@ -448,19 +454,23 @@ curl -s -o /dev/null -w '%{http_code}\n' http://connect.rom.miui.com/generate_20
   3. **网络特征探测**（主动扫描 UPnP、Ping 回应）-> 本项目已全部禁用。  
   在此三重加固下，运营商机房 DPI 探针只能看到一台特征纯净的标准 Windows 终端。
 
-### Q6：怎么避免电信 48 小时租期到期踢线与断网长时间等待？
+### Q6：怎么避免电信 48 小时租期到期踢线？以及为什么严禁盲目切通道（如切到 Channel 4 iOS）？
 - **痛点深度拆解**：
   1. **机房 48 小时强制下线**：电信机房对每次宽带认证设置了约 48 小时的单次会话租期硬顶。若上次拨号在晚上，跑满 48 小时后恰好会在晚间黄金用网期触发被踢下线；
   2. **OpenWrt 后台进程无 48 小时重连**：反编译与源码分析证实，OpenWrt 守护进程以 `--role auth` 启动，主循环中根本没有主动重连逻辑，完全被动等待机房踢线；
-  3. **即使客户端重连也是从开机算起**：若你在晚上 20:30 重启了路由器，48 小时到期依然在两天后的 20:30 黄金开黑期断网！
+  3. **切勿盲目进行“多通道热备”（致命避坑）**：
+     - 部分脚本或用户在遇到断网或重试失败时，喜欢自作聪明地把配置切换到 `Channel 4 (iOS)` 或 `Channel 5 (macOS)`；
+     - **真实高校机房大坑**：国内绝大多数高校（如广东电信一人一号高校）在 BRAS/AC 端口上**锁死了只允许 Windows 原生客户端通道（Channel 1，UA: CCTP/WinSVR5/1068）**！一旦切为 iOS/macOS 通道，机房直接返回鉴权失败或拒绝响应；
+     - 连续失败会导致进程在 60 秒内退出超过 5 次，直接触发 OpenWrt `procd` 的崩溃防护机制（停止拉起实例，变成 `active with no instances`），导致全屋整天彻底断网！
 - **解决方案（本项目核心神器 `esurfing-renew.sh`）**：
   - **清晨 05:30 优雅租期重置**：
-    - **杜绝盲目重启撞冷却**：若在 05:30 机械执行服务重启，由于旧会话刚登出，极易撞上机房 30~60 秒注销冷却期而首次失败。本项目专属脚本 `esurfing-renew.sh` 在停用服务后，**主动下线 WAN 口并休眠 10 秒**，为机房 BRAS 预留充足的旧会话注销时间；
-    - **重新握手与自检闭环**：重新拉起 WAN 口并启动服务后，脚本会**主动探测 204 放行状态**；确认 100% 通畅后才退出；
+    - **预留 25 秒充分冷释放**：电信机房 BRAS 判定旧会话注销需要 20~30 秒。本项目专属脚本 `esurfing-renew.sh` 在停用服务后，**主动下线 WAN 口并休眠 25 秒**，为机房清空会话锁；
+    - **永远锁定 Channel 1**：坚决摒弃切到不支持的 iOS 通道，确保每一次认证都走合法的 Windows 客户端通道；
+    - **60 秒耐心自愈轮询**：重新拉起 WAN 口并启动服务后，脚本会在 60 秒窗口内每 5 秒轮询探测 204 放行状态，静待原生客户端完成 Ticket 质询与登录；
     - **清零 48 小时计时器**：每天清晨自动将租期倒计时归零，**48 小时强制踢线永远不会在白天或晚间用网高峰期发生**！
   - **关于外部看门狗 `esurfing-watchdog.sh` 的退役说明**：
     - 在旧版（v2.1.5）客户端下，断网后指数退避较长，外部看门狗每 2 分钟强制重启打破死等；
-    - **在 v2.2.1+ 最新版下，强烈建议停止挂载每 2 分钟的外挂看门狗**！因为新版已内置单调钟 Watchdog 线程与 6 阶快速自愈，外部频繁杀进程会打断原生的 61 秒自愈，甚至触发新版 `60 秒内登录 2 次即休眠 35 分钟` 的防锁风控。将日常守护全权交由原生状态机 + procd 即可。
+    - **在 v2.2.1+ / v2.3.1+ 最新版下，强烈建议停止挂载每 2 分钟的外挂看门狗**！因为新版已内置单调钟 Watchdog 线程与 6 阶快速自愈，外部频繁杀进程会打断原生的 61 秒自愈，甚至触发新版 `60 秒内登录 2 次即休眠 35 分钟` 的防锁风控。将日常守护全权交由原生状态机 + procd 即可。
 
 ### Q7：装了 smartdns / AdGuard Home / mosdns 后，认证程序反复失败、日志报「联网检测全部失败」？
 
@@ -651,6 +661,17 @@ ping -c2 <学校DNS>                                # 通   ← 这个组合 = �
   # 3. 重启防火墙生效
   /etc/init.d/firewall restart
   ```
+
+### Q9：电脑同时插网线（连 CPE/手机热点）又连路由器 Wi-Fi 调试，为什么一连 Wi-Fi 电脑就瞬间断网？
+
+- **底层原因（Windows 网卡跃点数优先级冲突）**：
+  在 Windows 路由机制中，所有网络接口都有一个跃点数（Metric），**数值越小优先级越高**。默认情况下，Windows 常常将 Wi-Fi 的接口跃点数分配为较小值（如 `10`），而将以太网网线分配为较大值（如 `50`）。
+  当电脑连接未认证或无外网的路由器 Wi-Fi 时，Windows 发现 Wi-Fi 优先级更高，会**强行把整台电脑的默认外网网关（0.0.0.0/0）和 DNS 切给 Wi-Fi**！导致走网线的正常流量全被拦截丢弃，整台电脑表现为“连上 Wi-Fi 瞬间断网”。
+- **永久根治方案（网卡优先级固定）**：
+  1. 按 `Win + R` 输入 `ncpa.cpl` 回车打开网络连接面板；
+  2. 右键 **以太网（网线）** -> 属性 -> 双击 **TCP/IPv4** -> 高级 -> 取消勾选“自动跃点”，手动填写 **`10`**（最高优先级主力外网）；
+  3. 右键 **WLAN（Wi-Fi）** -> 属性 -> 双击 **TCP/IPv4** -> 高级 -> 取消勾选“自动跃点”，手动填写 **`100`**（低优先级内网通道）；
+  4. 确定保存后，电脑所有公网流量 100% 走网线，Wi-Fi 仅在访问路由器后台（如 `192.168.1.1` 或 `192.168.5.1`）时精准路由，双网卡完美共存！
 
 ---
 
