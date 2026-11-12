@@ -93,7 +93,39 @@ logger -t esurfing-renew "开始执行清晨 05:30 租期无感刷新..."
 ifdown wan >/dev/null 2>&1
 renew_sleep 25
 ifup wan >/dev/null 2>&1
-renew_sleep 5
+
+# 2.1 轮询等待 WAN 真正就绪，而不是死等固定秒数。
+#
+# 【为什么不能只 sleep 5】2026-11-13 05:30 那次故障的根因:
+#   ifup 之后交换机端口重新协商, 物理链路反复 up/down,
+#   WAN 直到 05:34 才拿到 IP —— 比旧版固定 sleep 5 晚了 3 分半。
+#   认证进程在无网状态下启动, 等不到网络就"退出码 0"自杀;
+#   而 procd 的 respawn 对退出码 0 不重生, 结果断网 2 小时无人知晓。
+#   平时 WAN 通常 3~5 秒就绪, 所以旧代码大多数日子能侥幸成功。
+#
+# 判定条件 = 有 IPv4 地址 且 有走 wan 的默认路由, 两者同时满足才算真的通。
+# 上限 180 秒: 覆盖今早实测的 3 分 24 秒, 又不至于无限等下去。
+wan_ready() {
+    ip -4 addr show dev wan 2>/dev/null | grep -q 'inet ' || return 1
+    ip route show default 2>/dev/null | grep -q 'dev wan' || return 1
+    return 0
+}
+
+wan_wait=0
+while [ $wan_wait -lt 180 ]; do
+    wan_ready && break
+    renew_sleep 5
+    wan_wait=$((wan_wait + 5))
+done
+
+# WAN 迟迟不就绪时直接放弃本轮, 不启动认证进程。
+# 因为此时 start 一定是"无网启动 -> 自杀", 反而让状态更糟;
+# 保持服务停止, 等 hotplug 或人工介入时 WAN 恢复后再认证更安全。
+if ! wan_ready; then
+    logger -t esurfing-renew "警告: ifup 后等待 180 秒 WAN 仍未就绪 (无 IP 或无默认路由)，放弃本次刷新以免认证进程无网自杀"
+    exit 1
+fi
+logger -t esurfing-renew "WAN 已就绪 (等待 ${wan_wait} 秒)"
 
 # 3. 严格锁定并确保以主通道 (Channel 1, Windows 客户端通道) 发起握手
 # 惠州学院校园网办理天翼校园宽带一人一号后，只放行 Windows 原生通道 (Channel 1)，
@@ -101,6 +133,23 @@ renew_sleep 5
 switch_channel 1
 
 /etc/init.d/esurfingclient start >/dev/null 2>&1
+
+# 3.1 校验认证实例是否真的起来了。
+# init 脚本在"账号列表为空"时会静默 return 0 (不报错也不起进程),
+# procd 对退出码 0 也不会重生, 所以只看 start 的返回值会把"假成功"当成已恢复。
+inst_wait=0
+while [ $inst_wait -lt 10 ]; do
+    if pgrep -f 'esurfingclient --role auth' >/dev/null 2>&1; then
+        break
+    fi
+    renew_sleep 1
+    inst_wait=$((inst_wait + 1))
+done
+
+if ! pgrep -f 'esurfingclient --role auth' >/dev/null 2>&1; then
+    logger -t esurfing-renew "错误: start 后 10 秒内仍未出现认证实例 (active with no instances)，本次刷新失败，需人工执行 /etc/init.d/esurfingclient start"
+    exit 1
+fi
 
 # 4. 轮询验证放行状态 (最长等待 60 秒，覆盖客户端 6 阶快速退避窗口)
 retries=0

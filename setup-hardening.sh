@@ -163,14 +163,29 @@ sed -i '/每 2 分钟网络健康看门狗/d' /etc/crontabs/root 2>/dev/null || 
 sed -i '/esurfingclient restart/d' /etc/crontabs/root 2>/dev/null || true
 
 CRON_MODIFIED=0
-if ! grep -q 'esurfing-renew.sh' /etc/crontabs/root 2>/dev/null; then
-    cat << 'EOF' >> /etc/crontabs/root
-# 每天清晨 05:30 优雅刷新租期 (带冷释放与自动通道热备，防踢线防假死)
-30 5 * * * /usr/bin/esurfing-renew.sh >/dev/null 2>&1
-EOF
-    CRON_MODIFIED=1
-    info "-> 已注入清晨 05:30 优雅租期重置计划任务 (预防性清零 48 小时机房硬顶)"
-fi
+
+# 【2026-11-13 重要变更】不再自动注入 05:30 的 esurfing-renew.sh 定时任务。
+#
+# 停用原因 (实测数据, 非推测):
+#   1. 现代电信校园网 WAN 侧走 DHCP, 租期 2 小时, udhcpc 每小时自动续期,
+#      从未出现过租期到期, WAN 层完全不需要脚本干预;
+#   2. 认证会话实测可连续保持 24 小时以上 (11-12 05:31 → 11-13 05:30),
+#      未观察到"48 小时硬顶"到期行为;
+#   3. esurfing-renew.sh 每次执行都会 ifdown wan 主动断网, 链路重新协商
+#      正常情况下 25 秒, 但交换机端口抖动时可长达 3~4 分钟甚至更久;
+#   4. 2026-11-13 05:30 的真实故障: ifup 后 WAN 花了 3 分 24 秒才重新拿到 IP,
+#      而旧脚本固定 sleep 5 就拉起认证进程, 导致其"无网启动 → 退出码 0 自杀",
+#      而 procd 的 respawn 对退出码 0 不重生, 最终断网 2 小时直到人工发现。
+#
+# 结论: 该脚本"每天主动断网以规避可能的 48 小时硬顶", 属于以确定的小成本
+#       对冲不确定的大风险, 在租期实际为 2 小时自动续期的线路上是净负担。
+#
+# 处理方式: 脚本文件仍然安装到 /usr/bin/ (便于需要时手动执行一次),
+#           但不再写入 crontab; 同时清理历史上已注入的旧任务。
+sed -i '/esurfing-renew.sh/d' /etc/crontabs/root 2>/dev/null || true
+sed -i '/每天清晨 05:30 优雅刷新租期/d' /etc/crontabs/root 2>/dev/null || true
+sed -i '/已停用.*esurfing-renew/d' /etc/crontabs/root 2>/dev/null || true
+info "-> 已清理历史 05:30 续约定时任务 (脚本保留在 /usr/bin/esurfing-renew.sh，需要时可手动执行)"
 
 if ! grep -q 'rotate.log' /etc/crontabs/root 2>/dev/null; then
     cat << 'EOF' >> /etc/crontabs/root
