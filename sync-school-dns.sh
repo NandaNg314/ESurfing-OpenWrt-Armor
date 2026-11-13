@@ -32,6 +32,10 @@ TAG="sync-school-dns"
 
 [ -f "$RESOLV" ] || exit 0
 
+# smartdns 未安装或未配置时直接退出, 避免 uci add server 到一个不存在的配置上
+[ -f /etc/config/smartdns ] || exit 0
+command -v uci >/dev/null 2>&1 || exit 0
+
 # 取第一个 nameserver（跳过注释行）
 DNS=$(grep '^nameserver' "$RESOLV" 2>/dev/null | head -n1 | awk '{print $2}')
 
@@ -54,7 +58,11 @@ if [ -n "$IDX" ]; then
     uci set "smartdns.@server[$IDX].ip=$DNS"
     logger -t "$TAG" "学校 DNS 变更: ${CUR:-空} -> $DNS"
 else
-    uci add smartdns server >/dev/null
+    # add 失败时立刻退出: 否则下面的 @server[-1] 会误改到别的 server 条目
+    if ! uci add smartdns server >/dev/null 2>&1; then
+        logger -t "$TAG" "新增 smartdns server 条目失败, 本次跳过"
+        exit 1
+    fi
     uci set smartdns.@server[-1].enabled='1'
     uci set smartdns.@server[-1].name="$UCI_NAME"
     uci set smartdns.@server[-1].port='53'

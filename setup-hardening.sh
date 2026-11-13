@@ -134,19 +134,19 @@ if [ -f /etc/config/turboacc ]; then
     info "-> 已禁用 turboacc 硬件加速 (杜绝 Turbo ACC 开机自动重新开启硬件流)"
 fi
 
-# 7. 部署清晨 48 小时租期预防性刷新与定时维护计划
-info "步骤 6/6: 配置清晨 48 小时租期优雅续约与定时维护计划..."
+# 7. 部署可选维护工具与日志清理计划
+info "步骤 6/6: 安装可选维护工具，并清理历史遗留的主动断网任务..."
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ -f "$SCRIPT_DIR/esurfing-watchdog.sh" ]; then
     cp "$SCRIPT_DIR/esurfing-watchdog.sh" /usr/bin/esurfing-watchdog.sh
     chmod +x /usr/bin/esurfing-watchdog.sh
-    info "-> 已备份备用看门狗脚本至 /usr/bin/esurfing-watchdog.sh (可选维护工具)"
+    info "-> 已安装手动自愈工具至 /usr/bin/esurfing-watchdog.sh (默认不挂 cron)"
 fi
 
 if [ -f "$SCRIPT_DIR/esurfing-renew.sh" ]; then
     cp "$SCRIPT_DIR/esurfing-renew.sh" /usr/bin/esurfing-renew.sh
     chmod +x /usr/bin/esurfing-renew.sh
-    info "-> 已安装清晨优雅续约脚本至 /usr/bin/esurfing-renew.sh"
+    info "-> 已安装手动租期重置脚本至 /usr/bin/esurfing-renew.sh (默认不挂 cron)"
 fi
 
 # 严格保护账号配置文件权限 (chmod 600，兼容新旧路径)
