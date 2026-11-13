@@ -134,19 +134,17 @@ if [ -f /etc/config/turboacc ]; then
     info "-> 已禁用 turboacc 硬件加速 (杜绝 Turbo ACC 开机自动重新开启硬件流)"
 fi
 
-# 7. 部署可选维护工具与日志清理计划
-info "步骤 6/6: 安装可选维护工具，并清理历史遗留的主动断网任务..."
+# 7. 清理历史遗留的主动断网/高频看门狗任务
+info "步骤 6/6: 清理历史遗留的主动断网与高频看门狗定时任务..."
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ -f "$SCRIPT_DIR/esurfing-watchdog.sh" ]; then
-    cp "$SCRIPT_DIR/esurfing-watchdog.sh" /usr/bin/esurfing-watchdog.sh
-    chmod +x /usr/bin/esurfing-watchdog.sh
-    info "-> 已安装手动自愈工具至 /usr/bin/esurfing-watchdog.sh (默认不挂 cron)"
-fi
 
-if [ -f "$SCRIPT_DIR/esurfing-renew.sh" ]; then
-    cp "$SCRIPT_DIR/esurfing-renew.sh" /usr/bin/esurfing-renew.sh
-    chmod +x /usr/bin/esurfing-renew.sh
-    info "-> 已安装手动租期重置脚本至 /usr/bin/esurfing-renew.sh (默认不挂 cron)"
+# 【设计说明】不再自动安装 esurfing-renew.sh / esurfing-watchdog.sh。
+#   - renew: 每次执行都会 ifdown wan 主动断网 25s~数分钟, 曾造成 2 小时断网
+#   - watchdog: 高频重启会打断新版客户端 6 阶自愈, 可能触发 35 分钟防频控休眠
+# 新版客户端已自带原生 Watchdog + procd 监管, 不需要任何第三方守护脚本。
+# 两个脚本仍保留在仓库中, 供确认线路存在租期硬顶时手动下载使用, 但不随本脚本部署。
+if [ -f "$SCRIPT_DIR/esurfing-renew.sh" ] || [ -f "$SCRIPT_DIR/esurfing-watchdog.sh" ]; then
+    info "-> 检测到仓库含 renew/watchdog 脚本, 已按当前策略跳过安装 (需要时请手动复制到 /usr/bin/)"
 fi
 
 # 严格保护账号配置文件权限 (chmod 600，兼容新旧路径)
@@ -180,12 +178,14 @@ CRON_MODIFIED=0
 # 结论: 该脚本"每天主动断网以规避可能的 48 小时硬顶", 属于以确定的小成本
 #       对冲不确定的大风险, 在租期实际为 2 小时自动续期的线路上是净负担。
 #
-# 处理方式: 脚本文件仍然安装到 /usr/bin/ (便于需要时手动执行一次),
-#           但不再写入 crontab; 同时清理历史上已注入的旧任务与残留注释。
+# 处理方式: 不再安装到 /usr/bin/, 也不写入 crontab;
+#           主动清理历史上已注入的旧任务与残留注释。
+#           同理清理 esurfing-watchdog.sh 的高频任务。
 sed -i '/esurfing-renew\.sh/d' /etc/crontabs/root 2>/dev/null || true
 sed -i '/每天清晨 05:30 优雅刷新租期/d' /etc/crontabs/root 2>/dev/null || true
 sed -i '/已停用 2026-11-13.*主动断网/d' /etc/crontabs/root 2>/dev/null || true
-info "-> 已清理历史 05:30 续约定时任务 (脚本保留在 /usr/bin/esurfing-renew.sh，需要时可手动执行)"
+sed -i '/esurfing-watchdog\.sh/d' /etc/crontabs/root 2>/dev/null || true
+info "-> 已清理续约/看门狗定时任务 (不再部署这两个脚本，日常守护交给客户端自身 Watchdog)"
 
 if ! grep -q 'rotate.log' /etc/crontabs/root 2>/dev/null; then
     cat << 'EOF' >> /etc/crontabs/root

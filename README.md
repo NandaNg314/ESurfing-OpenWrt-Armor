@@ -11,6 +11,19 @@
 
 ---
 
+> ## ⚠️ 两条必须先看的前提
+>
+> **① 请使用上游最新版客户端：[BadGhost520/ESurfingClient-CVersion](https://github.com/BadGhost520/ESurfingClient-CVersion) 的 `v2.3.1-r5` 或更新版本。**
+> 新版已内置单调钟 `Watchdog` 线程与 6 阶快速自愈、动态 ZSM 算法密钥池、302 自动学习认证地址，**本项目的可靠性完全建立在这个基础之上**。用 v2.1.5 等旧版会出现本项目所有守护策略都不生效、且无法按本文档排障的情况。
+>
+> **② 本项目仓库里的两个"守护脚本"默认都不要用，也不要用旧教程里的定时任务。**
+> - `esurfing-renew.sh` — **不要挂 cron**。它每次执行都会 `ifdown wan` 主动断网，曾在真实环境造成 **2 小时** 断网（详见 [FAQ Q6](#q6)）。仅在你**确认**所在线路存在租期到期踢线时手动执行一次。
+> - `esurfing-watchdog.sh` — **不要挂 cron**。新版客户端已自带自愈，外部高频杀进程会打断原生退避，并可能触发机房 `35 分钟` 防频控休眠。
+>
+> **本项目真正的价值是**：TTL/HopLimit=64 伪装、NTP 劫持、UPnP/LLTD 隐身、MT7621 硬件加速避坑、DNS 死锁修复，以及这些排障经验。**守护全靠客户端自身 + procd，不需要额外脚本。**
+
+---
+
 ## 🌟 项目简介与核心痛点解决
 
 在高校宿舍使用天翼校园宽带时，大家通常面临三大严苛限制：
@@ -26,7 +39,7 @@
 - **直击根源解决业务限制**：走原生客户端私有协议通道，彻底避开 `13018000`（Web锁死）与 `140010`（客户端本地IP比对）。
 - **拥抱最新守护架构与纯净自愈**：
   - **最新 v2.2.1+ 原生内核级看门狗协同**：上游新版已内置单调钟 `Watchdog` 线程与 6 阶快速心跳自愈，彻底告别外部脚本粗暴杀进程打破退避的旧时代，避免触发机房与客户端的频控惩罚；
-  - **应急手动重启工具（保留但默认不启用）**：提供 `esurfing-watchdog.sh` 供特定场景手动使用。**注意：不要挂载高频定时任务**——v2.2.1+ 已内置原生单调钟 Watchdog 与 6 阶自愈，外部高频强杀会打断原生自愈并可能触发机房 35 分钟防频控休眠；且该脚本**不做跨通道切换**（切 iOS/macOS 会导致机房鉴权死锁，详见 FAQ Q6）。
+  - **守护交给客户端自身，不装任何第三方脚本**：v2.2.1+ / v2.3.1+ 已内置单调钟 `Watchdog` 线程与 6 阶快速自愈，`procd` 负责进程监管。仓库里的 `esurfing-watchdog.sh` 与 `esurfing-renew.sh` **均不推荐使用，也不要挂 cron**——前者会被视为高频强杀而打断原生自愈、可能触发机房 35 分钟防频控休眠；后者每次执行都会主动断网（详见 FAQ Q6）。
 - **不再每日主动断网（2026-11-13 变更）**：实测现代电信校园网 WAN 侧走 DHCP（租期 2 小时、每小时自动续期），认证会话可连续保持 24 小时以上，未观察到「48 小时硬顶」到期。原「清晨 05:30 主动 ifdown wan 重置会话」的做法每次都会主动断网 25 秒至数分钟，风险大于收益，已默认停用（脚本保留，可按需手动执行）。详见 [FAQ Q6](#q6)。
 - **OpenWrt 23.05 内核级防共享伪装装甲**：
   - **TTL / Hop Limit 强制锁定**：出向 IPv4 与 IPv6 数据包强制改写为 `64`，彻底抹除路由转发跳数痕迹。
@@ -67,8 +80,8 @@
 | :--- | :--- | :--- |
 | [`setup-hardening.sh`](./setup-hardening.sh) | Shell 脚本 | **OpenWrt 一键防多设备检测加固脚本**（自动注入出向 TTL=64、配置 NTP 局域网劫持、隐藏路由特征、关闭崩溃级硬件流加速，并清理历史遗留的高频看门狗/续约定时任务） |
 | [`check-status.sh`](./check-status.sh) | Shell 脚本 | **一键状态健康自检脚本**（检查网卡、IP、拨号进程、防火墙计数、外网 DNS 与 204 放行、硬件流加速配置与定时计划） |
-| [`esurfing-watchdog.sh`](./esurfing-watchdog.sh) | Shell 脚本 | **手动自愈工具（默认不启用、不挂 cron）**（三态探针区分 204 在线 / 302 需认证 / 不可达，确认需要认证时重启服务。**不做通道切换**，永远锁定 Channel 1） |
-| [`esurfing-renew.sh`](./esurfing-renew.sh) | Shell 脚本 | **手动租期重置脚本（默认不再挂定时任务）**（主动下线 WAN 冷释放旧会话后重新认证，预留 WAN 就绪轮询与实例存活校验。仅在确认所在线路存在租期硬顶时手动执行） |
+| [`esurfing-watchdog.sh`](./esurfing-watchdog.sh) | Shell 脚本 | ⚠️ **不推荐使用，勿挂 cron**（新版客户端已自带 6 阶自愈，外部高频重启会打断原生退避并可能触发机房 35 分钟防频控。保留仅供排障参考，且**不做通道切换**，永远锁定 Channel 1） |
+| [`esurfing-renew.sh`](./esurfing-renew.sh) | Shell 脚本 | ⚠️ **不推荐使用，勿挂 cron**（每次执行都会 `ifdown wan` 主动断网 25s~数分钟，曾在真实环境造成 2 小时断网。仅在你**确认**线路存在租期到期踢线时手动执行一次） |
 | [`sync-school-dns.sh`](./sync-school-dns.sh) | Shell 脚本 | **学校 DNS 自动同步**（把校园网 DHCP 下发的学校 DNS 自动同步为 smartdns 上游，防止 DNS 软件导致「认证↔DNS」死锁，IP 不变时零开销） |
 | [`40-ttl-mangle.nft`](./40-ttl-mangle.nft) | nftables 规则 | OpenWrt 23.05+ (fw4) 原生出向流量锁定 TTL/HopLimit=64 规则片段 |
 | [`esurfingclient.example.json`](./esurfingclient.example.json) | 配置模板 | 天翼校园客户端脱敏配置文件模板（严格限制为 `chmod 600`，内置 Windows 客户端 Channel 1 通道参数） |
@@ -100,9 +113,11 @@
 
 ## 🚀 通用部署教程（全机型适用）
 
-### ⚠️ 部署前必读：客户端版本选择（强烈推荐 v2.3.1+）
+### ⚠️ 部署前必读：**必须使用 v2.3.1-r5 或更新的客户端**
 
-本项目全面推荐并深度适配 `esurfingclient` **v2.3.1-r5+ 最新版**。不同阶段版本在**核心健壮性、算法密钥池与配置架构**上有质的飞跃：
+> **本项目只支持 `esurfingclient` v2.3.1-r5 及以上版本。** 低于该版本请先升级，否则本项目的守护策略、配置路径、排障方法**全部不适用**。
+
+**先查你的版本：**
 
 ```sh
 opkg list-installed | grep esurfingclient
@@ -110,7 +125,34 @@ opkg list-installed | grep esurfingclient
 /usr/bin/esurfingclient --help 2>&1 | head -3
 ```
 
-| 对比维度 | v2.1.5 (老旧版) | v2.2.1-r7 (稳定版) | v2.3.1+ (最新推荐版, 如 v2.3.1-r5) |
+**输出不是 `2.3.1-r5` 或更高 → 请先去升级**，不要继续往下部署：
+
+```sh
+cd /tmp
+# 把 ARCH 换成你自己的架构（见下一步「常见芯片架构速查表」）
+ARCH=mipsel_24kc
+
+wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.3.1-r5/esurfingclient_2.3.1-5_${ARCH}.ipk
+wget https://github.com/BadGhost520/ESurfingClient-CVersion/releases/download/v2.3.1-r5/luci-app-esurfingclient_2.3.1-5_all.ipk
+opkg install esurfingclient_*.ipk luci-app-esurfingclient_*.ipk
+```
+
+> 国内下载慢可在 URL 前加反代前缀，如 `https://ghproxy.net/https://github.com/...`
+>
+> 最新版本号以 [上游 Releases](https://github.com/BadGhost520/ESurfingClient-CVersion/releases) 为准。本文档编写时最新为 **v2.3.1-r5（2026-11-06 发布）**。
+
+**用旧版会发生什么（不是危言耸听）：**
+
+| 后果 | 说明 |
+| --- | --- |
+| **配置路径不对** | v2.2.x 及以下把 JSON 裸写在 `/etc/config/esurfingclient`，本文档按 v2.3.0+ 的 `/etc/esurfingclient/ESurfingClient.json` 写，直接找不到配置 |
+| **没有任何自愈** | v2.1.5 无内置 Watchdog，断线后需外部脚本强杀打破退避；而本项目已按新版策略**不再挂外挂看门狗**，结果就是断了没人管 |
+| **容易封号** | v2.1.5 无频控保护；v2.2.x 是"60 秒登录 2 次休眠 35 分钟"，新版才是完整风控 |
+| **认证大范围失败** | 旧版算法密钥表过期，2026 年认证服务器已换密钥池，动态算号会失败 |
+
+不同版本的能力对比：
+
+| 对比维度 | v2.1.5 (❌ 不支持本项目) | v2.2.1-r7 (⚠️ 勉强可用) | **v2.3.1+ (✅ 本项目要求)** |
 | :--- | :--- | :--- | :--- |
 | **自愈守护架构** | 依赖外部脚本强杀服务打破退避 | 内置单调钟 `Watchdog.c` 守护线程 | **单调钟 Watchdog + 进程监管体系**，卡死自动自杀由 `procd` 秒级拉起 |
 | **Windows 密钥池** | 旧版算法表，易遭遇密钥失效 | 支持基础 Windows 通道 | **按探测结果重构裁剪算法表**，补齐 25 组新密钥，动态算号极速通过 |
@@ -119,7 +161,6 @@ opkg list-installed | grep esurfingclient
 | **心跳与退避机制** | 粗暴退出或长间隔等待 | 6 阶快速退避（1s~30s） | **区分网络抖动与服务端拒绝**，连续两次 302 才重认，防锁号风控安全休眠 |
 | **防锁号风控保护** | ❌ 无频控，易被机房封号 | 60 秒内登录 2 次休眠 35 分钟 | **机房风控多重防护**，杜绝短时频繁认证被拉黑封号 |
 
-**强烈推荐直接使用 v2.3.1+（最新版）**：
 - 完美适配广东电信 2026 最新认证服务器测速与 302 自动重定向。
 - 架构规范，不再冲撞 OpenWrt 的 UCI 机制。
 - ⚠️ **唯一前置要求**：如果你使用了 `smartdns` / `AdGuard Home` / `mosdns` 等接管 DNS 的软件，**安装前务必先阅读 [FAQ Q7](#faq)**（运行 `sync-school-dns.sh` 同步学校 DNS），避免在未认证状态下陷入「认证↔DNS」死锁。
@@ -245,15 +286,17 @@ chmod 600 /etc/esurfingclient/ESurfingClient.json
 
 #### 方案 A：一键加固脚本（强烈推荐）
 
-将仓库中的脚本（`setup-hardening.sh`、`esurfing-renew.sh`、`check-status.sh`，以及可选的 `esurfing-watchdog.sh`）上传至路由器 `/tmp` 目录并执行：
+只需 `setup-hardening.sh` 一个文件即可，上传至路由器 `/tmp` 后执行：
 
 ```bash
 cd /tmp
-chmod +x setup-hardening.sh esurfing-renew.sh check-status.sh
+chmod +x setup-hardening.sh
 sh setup-hardening.sh
 ```
 
-*脚本会自动完成出向 TTL/HL=64 规则注入、本地 NTP 授时服务启用与局域网重定向劫持、关闭 UPnP/LLTD、屏蔽外网 Ping、关闭导致内核 Panic 猝死重启的硬件流加速，并自动清理历史遗留的高频外部看门狗与清晨续约定时任务（v2.2.1+ 已自带原生单调钟 Watchdog，外部高频强杀会触发机房频控休眠；每日主动 ifdown wan 则会造成确定性断网）。*
+*脚本会自动完成：出向 TTL/HL=64 规则注入、本地 NTP 授时服务启用与局域网重定向劫持、关闭 UPnP/LLTD、屏蔽外网 Ping、关闭导致内核 Panic 猝死重启的硬件流加速，并**主动清理**历史遗留的高频外部看门狗与清晨续约定时任务。*
+
+> **注意**：脚本会**主动删除** `crontab` 里已有的 `esurfing-renew.sh` / `esurfing-watchdog.sh` 任务。这是有意为之——这两类任务会造成确定性断网或触发机房频控（原因见 [FAQ Q6](#q6)）。日常守护由客户端自带的 Watchdog + procd 完成。
 
 ---
 
@@ -325,20 +368,28 @@ sh setup-hardening.sh
    /etc/init.d/firewall restart
    ```
 
-5. **（可选）安装手动租期重置脚本——默认不挂定时任务**：
+5. **计划任务：只加日志清理，不加快守护脚本**：
    ```bash
-   # 安装脚本备用（仅在你确认所在线路存在「租期到期被踢线」时才需要手动执行一次）
-   cp esurfing-renew.sh /usr/bin/esurfing-renew.sh
-   chmod +x /usr/bin/esurfing-renew.sh
+   # ⚠️ 不要把 esurfing-renew.sh / esurfing-watchdog.sh 挂进 crontab
+   #   - renew 每次执行都会 ifdown wan 主动断网 25 秒至数分钟（详见 FAQ Q6）
+   #   - watchdog 的高频重启会打断新版客户端自带的 6 阶自愈，并可能触发
+   #     机房「60 秒登录 2 次休眠 35 分钟」的防频控机制
+   # 日常守护交给客户端自身 Watchdog + procd 即可，无需任何第三方脚本。
 
-   # 计划任务里只保留日志清理，不注入 05:30 续约任务
-   # 原因见 FAQ Q6：现代校园网 DHCP 租期 2 小时自动续，认证会话可保持 24h+，
-   # 而该脚本每次执行都会 ifdown wan 主动断网 25 秒至数分钟，风险大于收益。
+   # 仅添加日志清理（防 tmpfs 内存盘被轮转日志占满）
    cat << 'EOF' >> /etc/crontabs/root
    # 每月 1 号凌晨 04:00 自动清理历史轮转日志兜底 (防 tmpfs 内存盘溢出)
    0 4 1 * * rm -f /tmp/log/esurfing/logs/logs/*.rotate.log 2>/dev/null
    EOF
 
+   /etc/init.d/cron restart
+   ```
+
+   如果你是从旧版教程升级过来的，`crontab` 里可能还残留着旧的续约任务，执行下面命令清理（或直接跑 `setup-hardening.sh`，它会自动清理）：
+
+   ```bash
+   sed -i '/esurfing-renew\.sh/d' /etc/crontabs/root
+   sed -i '/esurfing-watchdog\.sh/d' /etc/crontabs/root
    /etc/init.d/cron restart
    ```
 </details>
