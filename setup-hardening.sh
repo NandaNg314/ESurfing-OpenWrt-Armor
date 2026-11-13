@@ -181,10 +181,10 @@ CRON_MODIFIED=0
 #       对冲不确定的大风险, 在租期实际为 2 小时自动续期的线路上是净负担。
 #
 # 处理方式: 脚本文件仍然安装到 /usr/bin/ (便于需要时手动执行一次),
-#           但不再写入 crontab; 同时清理历史上已注入的旧任务。
-sed -i '/esurfing-renew.sh/d' /etc/crontabs/root 2>/dev/null || true
+#           但不再写入 crontab; 同时清理历史上已注入的旧任务与残留注释。
+sed -i '/esurfing-renew\.sh/d' /etc/crontabs/root 2>/dev/null || true
 sed -i '/每天清晨 05:30 优雅刷新租期/d' /etc/crontabs/root 2>/dev/null || true
-sed -i '/已停用.*esurfing-renew/d' /etc/crontabs/root 2>/dev/null || true
+sed -i '/已停用 2026-11-13.*主动断网/d' /etc/crontabs/root 2>/dev/null || true
 info "-> 已清理历史 05:30 续约定时任务 (脚本保留在 /usr/bin/esurfing-renew.sh，需要时可手动执行)"
 
 if ! grep -q 'rotate.log' /etc/crontabs/root 2>/dev/null; then

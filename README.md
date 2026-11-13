@@ -505,12 +505,20 @@ curl -s -o /dev/null -w '%{http_code}\n' http://connect.rom.miui.com/generate_20
   - `ifup` 之后改为**轮询等待 WAN 真正就绪**（有 IPv4 地址 + 有走 wan 的默认路由，最长 180 秒），不再死等 5 秒；
   - `start` 之后**校验认证实例是否真的出现**，10 秒内没有实例则明确报错退出，不再"假成功"。
 
-**如果你所在线路确实存在租期到期被踢线**，手动执行一次即可：
+**如果你所在线路确实存在租期到期被踢线**，手动执行一次即可（执行期间会断网 25 秒至数分钟，请避开用网高峰）：
 
 ```bash
 /usr/bin/esurfing-renew.sh
-logger -t esurfing-renew "手动刷新完毕"   # 日志可用 logread -t esurfing-renew 查看
 ```
+
+执行后可用 `logread | grep esurfing-renew` 查看结果：
+
+```
+esurfing-renew: WAN 已就绪 (等待 3 秒)
+esurfing-renew: 清晨会话刷新成功，已放行上网！(用时 5 秒)
+```
+
+出现 `警告: ifup 后等待 180 秒 WAN 仍未就绪` 或 `错误: start 后 10 秒内仍未出现认证实例` 时，说明本次刷新失败，请检查 WAN 物理链路与 `/etc/init.d/esurfingclient status`。
 
 #### 四、切勿盲目进行"多通道热备"（仍然有效的致命避坑）
 

@@ -237,16 +237,21 @@ else
 fi
 
 if [ -x "/usr/bin/esurfing-renew.sh" ]; then
-    pass "清晨优雅续约脚本已安装且具备执行权限 (/usr/bin/esurfing-renew.sh)"
-else
-    warn "未检测到可执行的清晨续约脚本 (/usr/bin/esurfing-renew.sh)"
+    info "手动租期重置脚本已安装 (/usr/bin/esurfing-renew.sh，默认不挂定时任务，需要时手动执行)"
 fi
 
 CRON_JOB=$(crontab -l 2>/dev/null || cat /etc/crontabs/root 2>/dev/null || true)
-if echo "$CRON_JOB" | grep -q "esurfing-renew.sh"; then
-    pass "Crontab 每天清晨 05:30 优雅续约任务已挂载 (预防 48 小时踢线)"
+
+# 【2026-11-13 变更】默认不应挂载 05:30 的 renew 定时任务。
+# 现代校园网 WAN 走 DHCP(2 小时租期, 每小时自动续期), 认证会话实测可保持 24h+,
+# 而该脚本每次都会 ifdown wan 主动断网 25s~数分钟; 曾在 11-13 因 WAN 重新协商
+# 耗时 3 分 24 秒而导致认证进程无网自杀、断网 2 小时。详见 README FAQ Q6。
+if echo "$CRON_JOB" | grep -q "esurfing-renew\.sh"; then
+    warn "检测到 Crontab 中仍挂载 esurfing-renew.sh 定时任务！"
+    warn "  该任务每次执行都会 ifdown wan 主动断网 25s~数分钟，是确定性断网源"
+    warn "  除非你确认所在线路存在租期到期被踢线，否则建议执行 setup-hardening.sh 将其清理"
 else
-    warn "Crontab 中未找到清晨 05:30 优雅续约任务 (esurfing-renew.sh)"
+    pass "Crontab 未挂载主动断网的续约任务 (符合预期)"
 fi
 
 if echo "$CRON_JOB" | grep -q "esurfing-watchdog.sh"; then
