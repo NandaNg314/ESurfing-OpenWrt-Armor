@@ -1,15 +1,26 @@
 #!/bin/sh
 # ==============================================================================
-# ESurfing-OpenWrt-Armor - 双通道热备网络自愈看门狗
-# 功能: 定时探测外网 204 放行状态，区分"需要认证"与"完全断网"，
-#       仅在确认需要认证时打破官方指数退避并进行跨通道故障转移。
+# ESurfing-OpenWrt-Armor - 校园网认证手动自愈工具
+# 功能: 三态探测外网 204/302/不可达，在确认需要认证时重启认证服务。
+#
+# 【默认不启用】v2.2.1+ 客户端已内置单调钟 Watchdog 与 6 阶快速自愈，
+#               高频外部重启会打断原生自愈，并可能触发机房 35 分钟防频控休眠。
+#               本脚本仅供手动排障或极低频场景使用，请勿挂 2~5 分钟 cron。
+#
+# 【通道策略】永远只用 Channel 1 (Windows 原生通道)。国内多数高校机房只放行
+#             该通道，切 iOS/macOS 会触发鉴权死锁，故本脚本不做任何通道切换。
 # ==============================================================================
 
 FAIL_RECORD="/tmp/esurfing_watchdog_fails"
 COOL_RECORD="/tmp/esurfing_watchdog_cooldown"
 RENEW_LOCK="/tmp/esurfing_renew.lock"
-CONFIG_FILE="/etc/config/esurfingclient"
 RUN_LOG="/var/log/esurfing/logs/logs/run.log"
+
+# 配置目录动态解析: v2.3.0+ 的账号 JSON 在 /etc/esurfingclient/ESurfingClient.json，
+# 而 /etc/config/esurfingclient 只是 UCI 语法文件，里面根本没有 accounts/channel 字段。
+# 旧版这里写死 UCI 路径，导致 read_channel 永远读不到、switch_channel 必然失败。
+CFG_DIR=$(uci -q get esurfingclient.config.dir 2>/dev/null || echo "/etc/esurfingclient")
+CONFIG_FILE="$CFG_DIR/ESurfingClient.json"
 
 # 自愈最小冷却期(秒)。官方退避为 60s -> 300s，机房注销冷却期为 30~60s，
 # 低于 120s 的连续自愈会撞上注销窗口，反而制造失败。
@@ -160,37 +171,46 @@ switch_channel() {
     sed -i 's/"channel"[[:space:]]*:[[:space:]]*[0-9][0-9]*/"channel": '"$target_chn"'/' "$CONFIG_FILE"
 }
 
-# 一次性自愈动作: 记录冷却时间后重启服务
+# 6. 阶梯式自愈: 只重启服务, 永不切换通道
+#
+# 【重要】国内大多数高校机房(如广东电信一人一号)只放行 Windows 原生通道(Channel 1)。
+# 切到 iOS(4) / macOS(5) 会被直接判定鉴权失败并进入死锁, 使原本"重启即可恢复"
+# 的故障变成"必须人工介入"。因此这里所有阶段统一只做 restart。
+# 若历史版本已把通道改坏, 先强制纠回 Channel 1 再重启。
+if [ "$CURRENT_CHN" != "1" ]; then
+    logger -t esurfing-watchdog "检测到通道为 $CURRENT_CHN (非 1), 强制纠回 Channel 1..."
+    switch_channel 1 && CURRENT_CHN=1
+fi
+
+# 重启后校验实例是否真的起来: procd 对退出码 0 不会重生,
+# 只看 restart 返回值会把"假成功"当成已恢复。
 heal_restart() {
     echo "$NOW" > "$COOL_RECORD"
-    /etc/init.d/esurfingclient restart
+    /etc/init.d/esurfingclient restart >/dev/null 2>&1
+
+    local i=0
+    while [ $i -lt 10 ]; do
+        sleep 1
+        if pgrep -f 'esurfingclient --role auth' >/dev/null 2>&1; then
+            logger -t esurfing-watchdog "自愈后认证实例已就绪"
+            return 0
+        fi
+        i=$((i + 1))
+    done
+
+    logger -t esurfing-watchdog "警告: 重启后 10 秒内仍未出现认证实例, 请手动执行 /etc/init.d/esurfingclient start"
+    return 1
 }
 
-# 6. 阶梯式自愈
 case $FAILS in
-    1)
-        logger -t esurfing-watchdog "阶段 1 自愈: 重启认证服务打破指数退避..."
-        heal_restart
-        ;;
-    2)
-        NEW_CHN=4
-        if [ "$CURRENT_CHN" = "4" ]; then
-            NEW_CHN=1
-        fi
-        logger -t esurfing-watchdog "阶段 2 故障转移: 切换至通道 $NEW_CHN 进行热备拨号..."
-        switch_channel "$NEW_CHN" && CURRENT_CHN="$NEW_CHN"
-        heal_restart
-        ;;
-    3)
-        logger -t esurfing-watchdog "阶段 3 故障转移: 切换至备用通道 5 (macOS)..."
-        switch_channel 5 && CURRENT_CHN=5
+    1|2|3)
+        logger -t esurfing-watchdog "阶段 $FAILS 自愈: 重启认证服务 (连续失败 $FAILS 次, 通道 1)..."
         heal_restart
         ;;
     *)
-        # 连续失败 4 次以上: 大概率是学校断电/光纤中断/欠费，降频保底重试
+        # 连续失败 4 次以上: 大概率是学校断电/光纤中断/欠费, 降频保底重试
         if [ $((FAILS % 3)) -eq 0 ]; then
-            logger -t esurfing-watchdog "阶段 4 保底重试: 恢复为默认通道 1 重新唤醒..."
-            switch_channel 1 && CURRENT_CHN=1
+            logger -t esurfing-watchdog "阶段 4 保底重试 (连续失败 $FAILS 次, 通道 1): 重新唤醒认证服务..."
             heal_restart
         fi
         ;;
